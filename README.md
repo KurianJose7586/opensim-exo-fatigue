@@ -21,6 +21,7 @@ data/       raw datasets and processed OpenSim inputs   (gitignored)
 results/    simulation outputs                          (gitignored)
 figures/    plots for the paper
 refs/       papers, kept locally                        (gitignored)
+external/   third-party reference code (see NOTICE)
 ```
 
 `src/` areas: `fatigue/` (E1) · `mpc/` (MFAC reimplementation) · `musculoskeletal/` (OpenSim
@@ -35,16 +36,14 @@ python -m venv .venv && .venv/Scripts/activate && pip install -r requirements.tx
 OpenSim is **not** pip-installable — install it separately (4.5+, Moco is bundled) and add its
 Python API to the environment. See the guide, Stage S2.
 
-## External code — do not vendor
+## Reference code
 
-The authors' reference fatigue-model implementation:
+`external/PHRC/` holds the authors' fatigue-model implementation, included unmodified as the
+validation baseline for E1. **Do not edit it** — our own implementations go in `src/fatigue/`,
+written from the published equations.
 
-```bash
-git clone https://gitlab.com/lukapeternel/PHRC.git
-```
-
-**No license file, so it is not redistributable — keep it outside this repo.** It is the validation
-target for E1. Note the confirmed `range(2)` bug documented in
+Provenance and licensing: [`external/PHRC/NOTICE.md`](external/PHRC/NOTICE.md).
+Parameter values and a confirmed `range(2)` bug:
 [`docs/reference_implementation.md`](docs/reference_implementation.md).
 
 ## Key documents
