@@ -1,0 +1,14 @@
+# Core
+numpy
+scipy
+matplotlib
+pandas
+
+# E1 / MPC — same solver stack as Zhang et al. (CasADi + IPOPT) and OpenSim Moco
+casadi
+
+# Activation model (GPR), E8 sparse GP, E9 synergy extraction (NMF)
+scikit-learn
+
+# NOTE: OpenSim is not on PyPI. Install OpenSim 4.5+ separately (Moco is bundled)
+# and expose its Python API to this environment. See PROJECT_GUIDE.md, Stage S2.

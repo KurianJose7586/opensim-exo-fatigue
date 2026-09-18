@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.ipynb_checkpoints/
+
+# Data — large, regenerable, or redistribution-restricted. Never commit.
+data/raw/*
+data/processed/*
+!data/**/.gitkeep
+
+# Results — regenerable and potentially huge (batch sweeps).
+# Force-add small summary files you want versioned:  git add -f results/summary.csv
+results/*
+!results/.gitkeep
+
+# OpenSim / Simbody artefacts
+opensim.log
+*.log
+Geometry/
+*.vtp
+*.obj
+*.stl
+
+# Papers — copyright. Keep locally in refs/, never push.
+refs/*
+!refs/.gitkeep
+
+# MATLAB
+*.asv
+*.mex*
+slprj/
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
