@@ -9,12 +9,15 @@ Zhang et al. (2026) to multi-joint, per-muscle, differentiable fatigue dynamics.
 
 ## Status
 
-Not started. First task is **E1** (smooth fatigue dynamics) — see the guide.
+**E1 (smooth fatigue dynamics): validation done.** `python src/fatigue/model.py` reproduces the
+reference implementation exactly at k=0 and converges to it as k shrinks.
+Remaining E1 work — measuring what Zhang et al.'s frozen branch actually costs — needs the MFAC
+reimplementation, so it sits with Gate R. Next: Gate R.
 
 ## Layout
 
 ```
-docs/       teardowns of the anchor papers, gap analysis, preregistration
+docs/       teardowns of the anchor papers, gap analysis
 src/        code, one directory per extension area
 models/     OpenSim models: base / scaled to subject / with exoskeleton
 data/       raw datasets and processed OpenSim inputs   (gitignored)

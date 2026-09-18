@@ -5,7 +5,7 @@
 Semi-Rigid Knee Exoskeleton*, IEEE T-ASE 23:44–58. Full teardown in
 [`docs/mfac_teardown.md`](mfac_teardown.md).
 
-**Scope:** simulation only · **Compute:** laptop-sufficient · **Status:** not started
+**Scope:** simulation only · **Compute:** laptop-sufficient · **Status:** E1 validation done, Gate R next
 
 ---
 
@@ -285,14 +285,17 @@ capstone_project/
 ├── PROJECT_GUIDE.md
 ├── docs/
 │   ├── mfac_teardown.md       # full read of the anchor paper
+│   ├── peternel2019_teardown.md
+│   ├── reference_implementation.md
 │   ├── gap_analysis.md        # literature screening, ongoing
-│   └── preregistration.md     # endpoints fixed before results
+│   └── preregistration.md     # PLANNED: endpoints fixed before results
 ├── data/
 │   ├── raw/ processed/
 ├── models/
 │   ├── base/ scaled/ exo/
+├── external/PHRC/             # vendored reference code, do not edit (see NOTICE)
 ├── src/
-│   ├── fatigue/               # E1: smooth dynamics + validation
+│   ├── fatigue/               # E1: smooth dynamics + validation  [model.py done]
 │   ├── mpc/                   # MFAC reimplementation (CasADi)
 │   ├── musculoskeletal/       # OpenSim/Moco pipeline
 │   ├── allocation/            # E2: multi-DoF
