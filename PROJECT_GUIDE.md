@@ -2,7 +2,7 @@
 ### Personalized and Fatigue-Aware Lower-Limb Assistance Using MATLAB–OpenSim Moco
 
 **Status:** foundation built and validated (see §4). Realigned to the title 2026-09-19.
-**Scope:** simulation only · **Compute:** laptop for development, cluster for Phase D
+**Scope:** simulation only · **Compute:** laptop for Phases A–C, **HPC for Phase D**
 
 > Previous framing archived at [`docs/guide_v2_extension_framing.md`](docs/guide_v2_extension_framing.md).
 > It treated the project as an extension of Zhang et al. (2026). That produced good validated work
@@ -30,17 +30,25 @@
   smoothed dynamics (built, validated)     allocate torque across 3 joints
           |                                biarticular coupling is the mechanism
           v
-  AI SURROGATE                             learns assistance <-> muscle force map,
-  replaces the Moco call in the loop       so the loop runs in ms not minutes
+  LEARNED DYNAMICS (ensemble)              surrogate of musculoskeletal + fatigue
+  trained on ~10^4-10^5 Moco solves        dynamics, conditioned on the subject
+          |
+          v
+  MODEL-BASED RL POLICY                    long-horizon fatigue management --
+  millions of rollouts in the surrogate    the problem Moco cannot solve at all
           |
           v
   MATLAB orchestration                     scripting layer over the Moco side
 ```
 
-**Read the arrow from the surrogate back into the loop carefully — that is why the AI is not
-decorative.** Fatigue-aware allocation must evaluate many candidate assistance profiles. Each one
-changes the muscle forces, which requires a Moco solve, which takes minutes. Real-time control needs
-milliseconds. Learning that map is not an add-on; without it the control loop cannot close.
+**Two separate reasons the AI is load-bearing, not decorative.**
+
+1. Fatigue-aware allocation must evaluate many candidate assistance profiles. Each changes the muscle
+   forces, each needs a Moco solve taking minutes, and the loop must close in milliseconds.
+2. **The long-horizon problem is one Moco cannot solve at all.** Fatigue evolves over tens of
+   minutes; direct collocation over ten thousand gait cycles with muscle dynamics is infeasible, not
+   slow. There is no expert trajectory to imitate. That is what forces reinforcement learning rather
+   than supervised fitting.
 
 ---
 
@@ -54,7 +62,7 @@ milliseconds. Learning that map is not an add-on; without it the control loop ca
 | **Lower-Limb** | Phase C — hip, knee **and** ankle | Not started |
 | **Human–Exoskeleton** | Phase A — actuators plus device mass on the model | Partially (knee, abstract) |
 | **Fatigue-Aware** | Phase B — per-muscle fatigue, differentiable | **Done and validated** |
-| **AI-Driven** | Phase D — surrogate replacing the Moco call inside the control loop | Not started |
+| **AI-Driven** | Phase D — learned dynamics ensemble + model-based RL policy, on HPC | Not started |
 | **MATLAB** | Phase E — scripting layer; CasADi and Moco both have MATLAB interfaces | Not started |
 
 Re-check this table at every milestone. It is the definition of done.
@@ -140,27 +148,109 @@ solve time. **Write that solve time down — every Phase D decision depends on i
 **This needs a long planning horizon, which is exactly what the frozen-branch method cannot give —
 that is what `src/mpc/periodic.py` established.**
 
-### Phase D — The AI surrogate
+### Phase D — Learned dynamics and a long-horizon policy
 
-**Restores: AI-Driven. Structurally necessary, not bolted on.**
+**Restores: AI-Driven. This is the compute-heavy half of the project and it runs on the HPC.**
 
-The Phase C loop needs muscle forces for every candidate assistance profile. Each needs a Moco
-solve. That cannot run in a control loop.
+**Why this cannot be a small supervised model.** Imitating a Moco solution is curve-fitting — inputs
+in, optimiser's answer out. The genuinely hard problem is the one **Moco cannot solve at all**:
+fatigue evolves over tens of minutes, and direct collocation over ten thousand gait cycles with
+muscle dynamics is infeasible, not merely slow. There is no expert to imitate for the long-horizon
+policy. That is what forces reinforcement learning, and RL on musculoskeletal dynamics is
+notoriously sample-hungry — the reason the OpenSim RL challenges (*Learning to Run*, *AI for
+Prosthetics*, *Learn to Move*) were as hard as they were.
 
-- **D1** Sample across subject parameters, gait speed, fatigue state and assistance profile. Run
-  Moco at each point. **Warm-start from the nearest solved neighbour** — typically 3–5× faster and
-  the single highest-value optimisation here. Log failures; non-convergence is data.
-- **D2** Train the surrogate: assistance profile + subject + state → per-muscle forces. Small
-  network; this is a regression problem, not a reason to reach for something large.
-- **D3** Hold out **by subject**, never by random split — random splitting leaks subject identity
-  and will flatter the result.
-- **D4** **Closed-loop validation, the step that matters:** put the surrogate in the Phase C loop and
-  check the fatigue benefit survives. Low prediction error that loses the benefit is meaningless.
-- **D5** Report inference latency against Moco solve time. That ratio is the contribution.
+Three stages, each HPC-scale, each answering a question that stands on its own.
 
-*Optional depth, enabled by work already done:* because Phase B's dynamics are differentiable, the
-policy can in principle be trained **through** the optimiser rather than imitating it. That is the
-stronger version. Treat it as a stretch goal, not the plan.
+---
+
+#### D1 — Population dataset generation *(HPC, CPU, embarrassingly parallel)*
+
+Sample virtual subjects — anthropometry, muscle parameters, fatigue constants — crossed with walking
+speeds, slopes, loads and assistance profiles. Every point is a Moco solve.
+
+| Tier | Subjects x conditions x assistance | Solves | CPU-hours at 90 s |
+|---|---|---|---|
+| **1** shakedown | 50 x 5 x 10 | 2,500 | ~60 |
+| **2** standard | 200 x 8 x 15 | 24,000 | ~600 |
+| **3** full | 500 x 10 x 20 | 100,000 | ~2,500 |
+
+**Pick the tier once you know the queue limits.** Gate A's measured solve time replaces the 90 s
+placeholder — at 30 min/solve even Tier 1 is out of reach and the model must be reduced first.
+
+- **Warm-start from the nearest solved neighbour.** Typically 3-5x, the highest-value optimisation
+  available here.
+- Latin hypercube, not a grid. Grids waste samples in high dimensions.
+- Checkpoint and resume. Cluster jobs get killed; this will happen to you.
+- Log failures. Non-convergence maps where the solver breaks down, which is data.
+
+*Question it answers:* how does optimal assistance vary across a population and across fatigue
+states? The structure of that map is a result in its own right, before any learning.
+
+---
+
+#### D2 — Learned differentiable dynamics *(HPC, GPU if available)*
+
+Train a surrogate of the coupled musculoskeletal + fatigue dynamics, conditioned on subject
+parameters:
+
+```
+(subject params, state, fatigue state, assistance)  ->  next state, per-muscle forces
+```
+
+A sequence model or neural ODE over D1's trajectories — not a curve fit, and at Tier 2-3 a real
+GPU training job.
+
+**Train an ensemble (5-7 members), not a single network.** D3 needs the ensemble's disagreement to
+detect where the surrogate is untrustworthy. This is not optional; see the risk below.
+
+**Phase B's smoothed fatigue dynamics are what make this differentiable end-to-end.** The frozen
+branch would block gradients through the fatigue states. That is why E1 was foundational rather than
+a side quest, and it is worth saying so in the write-up.
+
+*Question it answers:* can coupled musculoskeletal and fatigue dynamics be learned accurately enough
+to substitute for simulation? A methods contribution independent of what the policy does with it.
+
+---
+
+#### D3 — Model-based RL for the long-horizon policy *(HPC)*
+
+The surrogate is fast enough for millions of rollouts, which OpenSim never would be.
+
+```
+observation  gait phase, per-muscle fatigue state, subject parameters
+action       assistance torque at hip, knee, ankle
+reward       long-horizon endurance (Peternel 2019 eq. 10 max-min) minus energy cost
+```
+
+- Off-policy algorithm (SAC or similar) with short rollouts branched from real D1 states rather than
+  long imagined ones — the MBPO pattern. Long rollouts in a learned model compound error.
+- Penalise ensemble disagreement in the reward so the policy is pushed away from regions where the
+  surrogate is guessing.
+
+**THE risk here is model exploitation:** the policy finds a corner where the surrogate is wrong and
+scores beautifully against a fiction. This is the standard failure mode of model-based RL and it
+will look like a great result until you check it. Short branched rollouts, ensemble penalties and
+D4's ground-truth validation are the mitigations — treat all three as mandatory.
+
+*Question it answers:* does a learned policy beat the optimiser over horizons the optimiser cannot
+reach, in real time, on subjects it never saw?
+
+---
+
+#### D4 — Validation *(non-negotiable)*
+
+- **Against Moco where Moco can solve.** Short horizons give ground truth. If the policy disagrees
+  with the optimiser there, nothing it does at long horizons is believable.
+- **Held out by subject, never by random split.** Random splitting leaks subject identity and will
+  flatter the result.
+- **Closed-loop benefit retention.** Put the policy in the real Phase C loop and check the fatigue
+  benefit survives. Low prediction error that loses the benefit is a meaningless number.
+- **Surrogate disagreement during evaluation.** Report how often the policy operated in
+  high-uncertainty regions. Reviewers will ask; better to have measured it.
+- **Inference latency against Moco solve time.** That ratio is the headline.
+
+---
 
 ### Phase E — MATLAB
 
@@ -177,13 +267,18 @@ the MATLAB API set up alongside the Python one.
 
 ## 6. Compute
 
-| Work | Laptop | Cluster |
+| Work | Laptop | HPC |
 |---|---|---|
 | Phase A, single subject, 2D model | ✅ | — |
 | Phase B (all of it) | ✅ | — |
 | Phase C development | ✅ | — |
-| Phase D dataset generation | ❌ | ✅ |
-| Multi-subject, 3D model, uncertainty sweeps | ❌ | ✅ |
+| **D1 population dataset** | ❌ | ✅ CPU, job array, 60–2500 core-hours by tier |
+| **D2 surrogate ensemble** | ❌ | ✅ GPU preferred; CPU-feasible at Tier 1 with smaller nets |
+| **D3 model-based RL** | ❌ | ✅ millions of rollouts, fast only because it runs in the surrogate |
+| Multi-subject 3D, uncertainty sweeps | ❌ | ✅ |
+
+**Find out before scoping D1:** core count and queue limits, wall-clock cap per job, whether GPU
+nodes exist, and whether MATLAB is licensed on the nodes. Those four answers pick the tier.
 
 **Phase A's recorded solve time determines Phase D's feasibility.** At 30 min/solve the dataset is
 months; at 90 s it is a weekend. Develop on the reduced 2D model, reproduce the headline result on
@@ -204,6 +299,9 @@ uniquely named output, checkpoint and resume. Retrofitting costs more.
 | Surrogate does not generalise across subjects | Medium | Split by subject early so you find out at D3, not D5 |
 | MATLAB access delayed | Medium | Everything works in Python; port last |
 | Biarticular effect turns out negligible | Medium | That is a publishable negative result — report the mechanism |
+| **Policy exploits surrogate error (D3)** | **High** | The standard model-based RL failure, and it looks like a *great* result until checked. Ensemble disagreement penalty, short branched rollouts, mandatory D4 ground-truth validation |
+| Surrogate inaccurate outside training distribution | High | Ensemble uncertainty; report how often the policy ran in high-disagreement regions |
+| HPC allocation smaller than assumed | Medium | Tiered D1. Drop to Tier 1, lean harder on warm-starting |
 
 ---
 
