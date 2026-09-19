@@ -1,364 +1,258 @@
 # AI-Driven Human–Exoskeleton Digital Twin
 ### Personalized and Fatigue-Aware Lower-Limb Assistance Using MATLAB–OpenSim Moco
 
-**Anchor paper:** Zhang, Jiang, Ajoudani, Tsagarakis (2026), *Muscle Fatigue-Aware Controller for a
-Semi-Rigid Knee Exoskeleton*, IEEE T-ASE 23:44–58. Full teardown in
-[`docs/mfac_teardown.md`](mfac_teardown.md).
+**Status:** foundation built and validated (see §4). Realigned to the title 2026-09-19.
+**Scope:** simulation only · **Compute:** laptop for development, cluster for Phase D
 
-**Scope:** simulation only · **Compute:** laptop-sufficient · **Status:** E1 complete, Gate R passed
-
----
-
-## 1. What this project is
-
-> Zhang et al. built a fatigue-aware exoskeleton controller for **one joint**, with a **scalar**
-> fatigue index, under **quasi-static** conditions, validated on **three subjects** doing squats and
-> stair steps. This project rebuilds their controller in a musculoskeletal simulation, then extends
-> it along the axes they identified as future work and the ones they quietly assumed away.
-
-We are not claiming to invent fatigue-aware assistance. We are taking a published controller and
-answering the questions its authors left open — which is a normal, respectable, and highly tractable
-way to do research. The technical depth comes from the extensions, not from a novelty claim.
-
-**Central technical question:**
-
-> Zhang et al. report that fatigue-aware control beats constant assistance by only **3.5%** on
-> endurance (76.15 s vs 73.60 s). Does that margin grow when assistance is allocated across
-> **multiple joints** using **muscle-level** fatigue states — and specifically, does biarticular
-> coupling make the allocation problem non-trivial?
+> Previous framing archived at [`docs/guide_v2_extension_framing.md`](docs/guide_v2_extension_framing.md).
+> It treated the project as an extension of Zhang et al. (2026). That produced good validated work
+> but drifted off three title terms — OpenSim Moco, AI, and multi-joint — because Zhang et al.
+> explicitly *avoid* musculoskeletal modelling and we inherited that avoidance. This document puts
+> the title back in charge. The anchor papers become component sources and validation targets, not
+> the project's frame.
 
 ---
 
-## 2. Validation strategy (the thing that makes simulation-only work credible)
+## 1. The system the title describes
 
-Without hardware you cannot validate against your own experiments. So validate against **theirs.**
+```
+  Camargo dataset                          subject marker + force + EMG data
+          |
+          v
+  OPENSIM MOCO                             scaled lower-limb musculoskeletal model
+  scale -> IK -> ID -> MocoInverse         + exo actuators at hip / knee / ankle
+          |                                + device mass
+          v
+  per-muscle forces  f_i(t | assistance)   the twin's output
+          |
+          v
+  CASADI FATIGUE + ALLOCATION LAYER        per-muscle fatigue states (Peternel 2019 eq. 7)
+  smoothed dynamics (built, validated)     allocate torque across 3 joints
+          |                                biarticular coupling is the mechanism
+          v
+  AI SURROGATE                             learns assistance <-> muscle force map,
+  replaces the Moco call in the loop       so the loop runs in ms not minutes
+          |
+          v
+  MATLAB orchestration                     scripting layer over the Moco side
+```
 
-Zhang et al. publish exact numbers for the static squat — time for the fatigue index to reach 0.8:
+**Read the arrow from the surrogate back into the loop carefully — that is why the AI is not
+decorative.** Fatigue-aware allocation must evaluate many candidate assistance profiles. Each one
+changes the muscle forces, which requires a Moco solve, which takes minutes. Real-time control needs
+milliseconds. Learning that map is not an add-on; without it the control loop cannot close.
 
-| Condition | Their result | Our target |
+---
+
+## 2. How each title term is delivered
+
+| Term | Delivered by | State |
 |---|---|---|
-| No assistance | 66.95 s | reproduce |
-| Constant 15% compensation | 73.60 s | reproduce |
-| MFAC | 76.15 s | reproduce |
+| **OpenSim Moco** | Phase A — the musculoskeletal twin is the core, not an accessory | Not started |
+| **Digital Twin** | Phase A — model scaled to a real subject, validated against their measured gait | Not started |
+| **Personalized** | Phase A + B — subject scaling, and per-subject fatigue constants (method validated) | Method done, n=1 |
+| **Lower-Limb** | Phase C — hip, knee **and** ankle | Not started |
+| **Human–Exoskeleton** | Phase A — actuators plus device mass on the model | Partially (knee, abstract) |
+| **Fatigue-Aware** | Phase B — per-muscle fatigue, differentiable | **Done and validated** |
+| **AI-Driven** | Phase D — surrogate replacing the Moco call inside the control loop | Not started |
+| **MATLAB** | Phase E — scripting layer; CasADi and Moco both have MATLAB interfaces | Not started |
 
-Plus power-rate ratios: MFAC ≈ 4× lower initial power than constant assistance on periodic squat,
-≈ 3× on stair stepping (their Fig. 10).
-
-**Gate R:** reimplement their controller — same fatigue model (8), same MPC (26), same barrier cost
-(27), same constraints — driven by a simulated squat, and land within a defensible margin of those
-times. Until this passes, every extension result is unfalsifiable.
-
-This gate is also your paper's Figure 1 and your methods-validation section. It is not overhead.
+Re-check this table at every milestone. It is the definition of done.
 
 ---
 
-## 3. The extension set
+## 3. What the anchor papers are *for*
 
-Each extension is independently publishable-as-a-section and independently droppable. Ordered by
-value-per-effort, not by dependency.
+They are no longer the frame. They are three specific things:
 
-| ID | Extension | Origin | Depth | Effort |
-|---|---|---|---|---|
-| **E1** | Smooth, differentiable fatigue dynamics across the decay/recovery threshold | W1 (their hack) | High | **DONE** |
-| **E2** | Continuous optimal multi-DoF allocation with biarticular coupling | FW3 | **Highest** | High |
-| **E3** | Per-muscle fatigue states replacing the scalar index | W4 | High | **Low** |
-| **E4** | Full dynamics + walking instead of quasi-static squats | W2 | Medium | Medium |
-| **E5** | Gait-phase torque prediction replacing Taylor extrapolation | W3 | Medium | **Low** |
-| **E6** | Recovery-rate identification and sensitivity analysis | W5 | Medium | **Low** |
-| **E7** | Cross-subject generalization of the activation model | FW2 | Medium | Medium |
-| **E8** | Sparse/variational GP replacing exact GPR | FW1 | Low | **Low** |
-| ~~E9~~ | ~~Synergy-based muscle grouping~~ — **scooped**, Lambeth et al. 2025 did it. Use the technique, cite them, drop the claim | — | — | — |
-
-**Recommended core:** E1 + E3 + E2, in that order. That is a coherent paper — *"per-muscle,
-multi-joint, differentiable fatigue-aware assistance"* — with E5 and E6 as supporting sections.
-
-> **PubMed sweep 2026-09-19 (see [`gap_analysis.md`](gap_analysis.md)):** E1 is clear — one
-> irrelevant hit in the whole index. E2 is narrowed: Lambeth et al. 2025 and Bao et al. 2020 already
-> do fatigue-driven multi-joint allocation, but for *hybrid FES* exoskeletons with FES-induced
-> fatigue. **Biarticular coupling remains open** (3 hits, all pre-2006) and is now E2's stated wedge.
-> E9 is scooped outright. **E1 is the strongest surviving novelty claim — lead with it.**
-
-> **Read [`peternel2019_teardown.md`](peternel2019_teardown.md) before starting.** It changes E2 and
-> E3 substantially: the per-muscle fatigue model already exists (published 2019, same group), and
-> load redistribution between muscle groups has already been demonstrated to work. Both extensions
-> get safer and better-founded; neither becomes unnecessary.
-
----
-
-### E1 — Smooth fatigue dynamics *(start here)*
-
-**What they did:** the fatigue ODE (8) switches hard at `M_th` between decay and recovery. That
-discontinuity breaks gradient-based optimization, so they **freeze the branch** for the entire
-prediction horizon based on the current activation.
-
-**Why it's wrong:** in cyclic tasks the branch flips *inside* the horizon. Their own Fig. 9 shows
-`V` rising and falling within cycles. The MPC optimizes the wrong dynamics for part of every cycle.
-Under walking — stance loads, swing unloads, every second — it gets worse.
-
-**What to build:** a tanh-blended formulation of (8), differentiable through the threshold, with a
-smoothing parameter. Then prove it:
-
-1. Integrate original and smoothed ODEs under identical activation traces; show convergence as the
-   smoothing parameter tightens
-2. Implement both MPCs; measure the cost of the frozen-branch approximation across duty cycles
-3. Show where the error is worst — high transition frequency is the predicted regime
-
-**Why start here:** pure ODE and NLP work. No OpenSim, no musculoskeletal model, no C++. Runs in
-seconds. **And the discontinuity is not one paper's hack — it runs through the whole model lineage:**
-Ma 2009 → Peternel 2018 → Peternel 2019 → Zhang 2026. Repairing it fixes a structural defect in a
-model family spanning at least four papers. **Highest value per hour in the project.**
-
----
-
-### E2 — Continuous optimal multi-DoF allocation *(the core contribution)*
-
-They frame this as "extend to more joints." It is not additive, because of **biarticular muscles:**
-
-| Muscle | Crosses |
+| Paper | Role now |
 |---|---|
-| Rectus femoris | hip **and** knee |
-| Hamstrings | hip **and** knee |
-| Gastrocnemius | knee **and** ankle |
+| **Zhang et al. 2026** | Validation target (66.95 / 73.60 / 76.15 s) and the single-joint baseline to beat. Their MPC formulation (eq. 24–30) is the controller structure we generalise |
+| **Peternel et al. 2019** | Source of the per-muscle fatigue equation, the max-min endurance objective, and the OpenSim static-optimisation pipeline pattern |
+| **Lambeth 2025, Bao 2020** | Closest prior art for fatigue-driven allocation — cite and distinguish, do not re-derive |
 
-Assisting the hip changes knee muscle loading. Assisting the ankle changes knee loading. **The
-allocation problem is coupled, and a per-joint scalar fatigue index has no variable capable of
-representing that coupling.**
+Plain-language summaries of all of these: [`notes/papers.md`](notes/papers.md).
 
-**Precedent — this is good news.** Peternel et al. 2019 (FMP2) already demonstrated that
-redistributing load between muscle groups extends endurance, validated on 6 subjects. The hypothesis
-is no longer speculative. But their mechanism was a **discrete threshold-triggered switch** that
-changed *task geometry* — rotating the object the human works on. The gap:
+---
 
-| | Peternel 2019 FMP2 | E2 |
+## 4. What is already built — and where it fits
+
+Nothing done so far is wasted. It all becomes the fatigue layer and the validation anchor.
+
+| Built | New role |
+|---|---|
+| `src/fatigue/model.py` — smoothed fatigue dynamics, exact at k=0 | **Phase B core.** The enabler: without it the fatigue layer cannot be optimised by gradients, and the allocation horizon is capped |
+| `src/fatigue/calibrate.py` — per-subject constant fitted, predicts held-out trials to 0.6% | **Phase B personalisation**, method already validated against real data |
+| `src/mpc/mfac.py` — their controller in CasADi, reproduces their trial to 1.7% | **The single-joint baseline** Phase C must beat, and proof our fatigue layer is correct |
+| `src/mpc/periodic.py` — frozen branch caps horizon at ~0.05·C_F | **The justification for Phase C.** Multi-joint allocation needs a long horizon; the published method cannot provide one |
+
+That last row matters: the earlier work produced the argument for why the title's project is
+necessary. Keep it in the write-up as motivation, not as a separate contribution.
+
+---
+
+## 5. Phases
+
+### Phase A — The musculoskeletal digital twin · OpenSim Moco
+
+**Restores: OpenSim Moco, Digital Twin, Personalized, Human–Exoskeleton.**
+
+- **A1** Install OpenSim 4.5+ (Moco bundled). Get the **Python API** working now and the **MATLAB
+  API** (`configureOpenSim.m`) working for Phase E. Run the bundled Moco examples unmodified.
+- **A2** Camargo dataset, one subject first. Scale a lower-limb model. Start with the reduced 2D
+  model — solve time is the governing constraint and you must measure it before committing.
+- **A3** Inverse kinematics and inverse dynamics. Check marker error and compare joint moments to
+  published normative ranges.
+- **A4** `MocoInverse` or static optimisation → **per-muscle forces**. This is the twin's output and
+  what the fatigue layer consumes.
+- **A5** Add `CoordinateActuator`s at hip, knee, ankle. **Add the device mass** — omitting it is the
+  standard way to report a benefit that does not exist. Use Zhang et al. 2021 for real limits.
+
+**Gate A:** muscle forces for one subject's gait cycle, with and without assistance, and a recorded
+solve time. **Write that solve time down — every Phase D decision depends on it.**
+
+### Phase B — Fatigue in the twin
+
+**Restores: Fatigue-Aware. Largely built.**
+
+- **B1** Per-muscle fatigue states driven by Phase A muscle forces — Peternel 2019 eq. 7. Group by
+  function, not one state per muscle. *Note: their released code has a confirmed `range(2)` bug that
+  silently drops muscles past the second; see [`docs/reference_implementation.md`](docs/reference_implementation.md).*
+- **B2** Smoothed dynamics — **done**, `src/fatigue/model.py`.
+- **B3** Per-subject constants — method **done**, `src/fatigue/calibrate.py`. Extend to more subjects.
+- **B4** **Validation gate:** reduce the twin to Zhang et al.'s single-joint static squat and
+  reproduce 66.95 / 73.60 / 76.15 s. Already achieved in the abstract model (1.7%); repeat it
+  *through the OpenSim pipeline* to prove the twin is wired correctly.
+
+### Phase C — Fatigue-aware multi-joint assistance
+
+**Restores: Lower-Limb Assistance. The main scientific contribution.**
+
+- **C1** Allocate an assistance budget across hip, knee and ankle to minimise fatigue, using the
+  max-min endurance objective from Peternel 2019 eq. 9–10 — published and citable, do not invent one.
+- **C2** **Biarticular coupling is the mechanism and the novelty.** Rectus femoris and hamstrings
+  cross hip and knee; gastrocnemius crosses knee and ankle. Assisting one joint changes another
+  joint's muscle loading. A per-joint scalar fatigue index cannot represent this; per-muscle states
+  can. Literature check: `biarticular AND fatigue AND assistance` returns 3 papers, all pre-2006.
+- **C3** Compare against: no assistance · Zhang-style single-joint · independent per-joint
+  controllers · fatigue-blind multi-joint · coupled allocation (ours).
+
+**This needs a long planning horizon, which is exactly what the frozen-branch method cannot give —
+that is what `src/mpc/periodic.py` established.**
+
+### Phase D — The AI surrogate
+
+**Restores: AI-Driven. Structurally necessary, not bolted on.**
+
+The Phase C loop needs muscle forces for every candidate assistance profile. Each needs a Moco
+solve. That cannot run in a control loop.
+
+- **D1** Sample across subject parameters, gait speed, fatigue state and assistance profile. Run
+  Moco at each point. **Warm-start from the nearest solved neighbour** — typically 3–5× faster and
+  the single highest-value optimisation here. Log failures; non-convergence is data.
+- **D2** Train the surrogate: assistance profile + subject + state → per-muscle forces. Small
+  network; this is a regression problem, not a reason to reach for something large.
+- **D3** Hold out **by subject**, never by random split — random splitting leaks subject identity
+  and will flatter the result.
+- **D4** **Closed-loop validation, the step that matters:** put the surrogate in the Phase C loop and
+  check the fatigue benefit survives. Low prediction error that loses the benefit is meaningless.
+- **D5** Report inference latency against Moco solve time. That ratio is the contribution.
+
+*Optional depth, enabled by work already done:* because Phase B's dynamics are differentiable, the
+policy can in principle be trained **through** the optimiser rather than imitating it. That is the
+stronger version. Treat it as a stretch goal, not the plan.
+
+### Phase E — MATLAB
+
+**Restores: MATLAB.**
+
+Moco has a MATLAB API; CasADi has a MATLAB interface. The Moco orchestration and the fatigue layer
+both port. **Keep the learning in Python** — that split is standard and defensible, and the handoff
+is files on disk, which both read natively.
+
+Your mentor owns this. **Give them a date.** They are on the critical path from Phase A if you want
+the MATLAB API set up alongside the Python one.
+
+---
+
+## 6. Compute
+
+| Work | Laptop | Cluster |
 |---|---|---|
-| Mechanism | change task geometry | allocate assistance torque |
-| Control | discrete switch at threshold | **continuous optimal** allocation |
-| Coupling | task force direction | **biarticular muscles** |
+| Phase A, single subject, 2D model | ✅ | — |
+| Phase B (all of it) | ✅ | — |
+| Phase C development | ✅ | — |
+| Phase D dataset generation | ❌ | ✅ |
+| Multi-subject, 3D model, uncertainty sweeps | ❌ | ✅ |
 
-**Objective function — use theirs, don't invent one.** Peternel 2019 eq. (9)–(10) give a max-min
-endurance formulation:
+**Phase A's recorded solve time determines Phase D's feasibility.** At 30 min/solve the dataset is
+months; at 90 s it is a weekend. Develop on the reduced 2D model, reproduce the headline result on
+3D Rajagopal, and say so plainly in the methods.
 
-```
-T_i = -(C_i / f_mi) · ln(1 - V_th)          per-muscle endurance time
-argmax ( min_i T_i )                        maximize the weakest muscle's endurance
-```
-
-Published, citable, and directly comparable to their results.
-
-**The experiment:** allocate a fixed assistance budget across hip/knee/ankle. Compare independent
-per-joint MFAC controllers (the naive extension Zhang et al. imply) against coupled allocation using
-per-muscle fatigue states. **Hypothesis:** they differ, driven by biarticular coupling. If false, you
-have shown the naive extension suffices — also useful, also reportable.
-
-Requires E3.
+Write every batch stage as a job array from the start — parameterised by index, config from file,
+uniquely named output, checkpoint and resume. Retrofitting costs more.
 
 ---
 
-### E3 — Per-muscle fatigue states *(now low-risk)*
+## 7. Risks
 
-**This model already exists.** Peternel et al. 2019 eq. (7) is the per-muscle form:
-
-```
-dV_i/dt =  (1 - V_i)·f_mi/C_i     if f_mi ≥ f_th
-          -V_i·R/C_i              if f_mi <  f_th
-```
-
-with `V_i` per muscle and `C_i` a per-muscle capacity parameter. **Zhang et al. 2026 collapsed this
-to a single scalar for one muscle group — a regression in fidelity by the same research group.**
-
-E3 is therefore not a novel modelling claim. It is *restoring the per-muscle formulation the group
-already published, into the exoskeleton MPC context.* Safer to defend, faster to build.
-
-**Grouping:** use functional groups rather than one state per muscle — see E9 for choosing them
-defensibly.
-
-**Keep the Peternel/Ma model, don't swap to Xia & Frey-Law.** Staying in this lineage keeps results
-directly comparable to both anchor papers. Note Xia & Frey-Law as an alternative; don't spend the
-project on it.
-
----
-
-### E4 — Full dynamics and walking
-
-Their model (3) is gravity + GRF with inertial terms *"ignored."* Fine for squats, false for gait.
-Move to full OpenSim inverse dynamics and from squats to walking. This is what turns the project from
-"knee exo for squatting" into "lower-limb assistance during gait," which is what the title claims.
-
-**Motivate this carefully.** Peternel 2019 justifies static optimization by citing Anderson & Pandy:
-*"Static and dynamic optimization solutions for gait are practically equivalent."* That citation is
-about gait, so it undercuts any claim that full dynamics is needed for muscle-force *estimation*.
-**Motivate E4 by the MPC horizon problem instead** — predicting future joint torque across a horizon
-during dynamic gait, which is where the quasi-static assumption actually breaks (see E5). Do not
-overclaim.
-
----
-
-### E9 — Scalable muscle grouping
-
-Peternel 2019's grouping algorithm *"goes through all possible divisions of muscle groups"* and forces
-exactly two. Fine for 6 arm muscles; **combinatorially explosive for 18+ lower-limb muscles across
-three joints**, and the two-group restriction is arbitrary.
-
-Replace with principled grouping: muscle synergy extraction (NMF on activation patterns) or spectral
-clustering on a coupling matrix, yielding a data-driven number of groups. Concrete, technically
-substantive, and it directly enables E3.
-
----
-
-### E5 — Gait-phase torque prediction *(cheap, obvious)*
-
-They predict future joint torque over the horizon by second-order Taylor extrapolation (21), and
-admit it *"may introduce instability… in the presence of rapid motions or noise."*
-
-Walking is periodic. **Gait phase predicts future torque far better than derivative extrapolation.**
-Build a phase-indexed predictor, compare horizon prediction error against their Taylor scheme. Small
-effort, clean result, directly addresses an admitted weakness.
-
----
-
-### E6 — Recovery rate *(cheap, rigorous)*
-
-`C_F` is fitted per subject. `R` is *"a conservative value of R = 0.5 reported in [17]"* — not
-fitted, not justified. **Recovery dominates cyclic tasks** because every swing phase is recovery.
-
-Run a sensitivity analysis over `R`. If the controller's behaviour is sensitive to an unvalidated
-constant, that is worth reporting, and it is a half-day of compute.
-
----
-
-### E7 / E8 — Their stated future work
-
-**E7 (cross-subject):** they want to drop per-subject EMG calibration. In simulation you can scale
-models across anthropometry and study transfer at an `n` they cannot reach with three subjects.
-
-**E8 (sparse GP):** they name inducing points, variational inference, structured kernel
-interpolation. Well-defined, standard tooling, low risk. A safe section if you need one.
-
----
-
-## 4. Stages and gates
-
-| Stage | Work | Gate | Laptop? |
-|---|---|---|---|
-| **S0** | Finish screening the literature; complete [`gap_analysis.md`](gap_analysis.md) | Can state in one sentence what each extension adds beyond Zhang et al. | ✅ |
-| **S1** | **E1 smoothing validation** — pure ODE, no OpenSim | Smoothed ODE converges to original; error quantified vs duty cycle | ✅ |
-| **S2** | Environment: OpenSim + Moco + CasADi; run bundled examples | `exampleMocoTrack` converges | ✅ |
-| **S3** | **Gate R** — reimplement MFAC, reproduce 66.95 / 73.60 / 76.15 s | Within defensible margin of published values | ✅ |
-| **S4** | E3 muscle-level fatigue on the scaled model | Fatigue states track published activation patterns | ✅ |
-| **S5** | E4 full dynamics + walking task | Walking simulation with fatigue accumulating sensibly | ✅ |
-| **S6** | **E2 multi-DoF allocation** — the core experiment | Coupled vs independent allocation differ, or provably don't | ⚠️ |
-| **S7** | E5, E6 supporting sections | — | ✅ |
-| **S8** | E7 cross-subject, E8 sparse GP if time | — | ⚠️ |
-| **S9** | Ablations, writing | — | ✅ |
-
-**S1 and S2 are independent — run them in parallel.** S1 needs nothing installed.
-
----
-
-## 5. Compute
-
-Their entire system runs on a laptop: i9-12900H, **3.53 ms per MPC solve**, 100 Hz control loop.
-Nothing in the anchor paper needs a cluster, and most extensions don't either.
-
-Cluster only helps for: E7 multi-subject sweeps, E2 allocation parameter studies, any Monte Carlo
-over fatigue parameters. **You are not blocked on cluster access for the core contribution.**
-
-Write batch stages as job arrays anyway — parameterized by index, config from file, uniquely named
-outputs. Retrofitting costs more than doing it now.
-
----
-
-## 6. Toolchain note
-
-Convenient alignment: **Zhang et al. use CasADi + IPOPT. OpenSim Moco's fast backend is also
-CasADi.** Same solver stack throughout, and CasADi has both MATLAB and Python interfaces — so the MPC
-layer ports to whichever your mentor prefers without touching the formulation.
-
-Their GPR is scikit-learn (stated in §II-C), so E8 stays in Python regardless.
-
-**You no longer need a C++ plugin.** The earlier plan required subclassing OpenSim components to
-embed fatigue states. Anchoring to their MPC formulation means fatigue lives in *your* CasADi
-optimization problem, not inside OpenSim's. That removes the single riskiest toolchain dependency
-from the project.
-
----
-
-## 7. Repository structure
-
-```
-capstone_project/
-├── PROJECT_GUIDE.md
-├── docs/
-│   ├── mfac_teardown.md       # full read of the anchor paper
-│   ├── peternel2019_teardown.md
-│   ├── reference_implementation.md
-│   ├── gap_analysis.md        # literature screening, ongoing
-│   └── preregistration.md     # PLANNED: endpoints fixed before results
-├── data/
-│   ├── raw/ processed/
-├── models/
-│   ├── base/ scaled/ exo/
-├── external/PHRC/             # vendored reference code, do not edit (see NOTICE)
-├── src/
-│   ├── fatigue/               # E1: smooth dynamics + validation  [model.py done]
-│   ├── mpc/                   # MFAC reimplementation (CasADi)
-│   ├── musculoskeletal/       # OpenSim/Moco pipeline
-│   ├── allocation/            # E2: multi-DoF
-│   ├── activation/            # GPR / sparse GP
-│   └── jobs/
-├── results/                   # timestamped, config-stamped, git-hash-stamped
-└── figures/
-```
+| Risk | Severity | Mitigation |
+|---|---|---|
+| OpenSim install / API friction | High | Gate A1 early. It is the first thing that can stall you |
+| Moco solve time makes Phase D infeasible | High | Measure at Gate A. Reduce model, reduce samples, warm-start |
+| Marker set mismatch in the dataset | Medium | Attack in A2, not later |
+| Surrogate does not generalise across subjects | Medium | Split by subject early so you find out at D3, not D5 |
+| MATLAB access delayed | Medium | Everything works in Python; port last |
+| Biarticular effect turns out negligible | Medium | That is a publishable negative result — report the mechanism |
 
 ---
 
 ## 8. Immediate next actions
 
-1. **Start E1.** Implement fatigue model (8) and its smoothed variant; compare under identical
-   activation traces. Pure Python, no installs, no OpenSim. This is a self-contained result and it
-   de-risks the whole project.
-2. **Install OpenSim + Moco** in parallel; get `exampleMocoTrack` converging.
-3. **Finish literature screening** in `gap_analysis.md` — particularly the FES review's references,
-   to see whether smooth fatigue-in-optimal-control already exists there. It may; E1's framing then
-   becomes *"first applied to exoskeleton assistance control"* rather than *"first."*
-4. Email the authors. The paper is open access, the work is EU-funded (SOPHIA 871237, HARIA
-   101070292), and they may share the Exo-Muscle URDF or their fitted `C_F` values. Costs one email.
+1. **Install OpenSim 4.5+**, Python API working, bundled Moco examples converging. Nothing in
+   Phase A–D starts without this.
+2. Ask your mentor to set up the **MATLAB API** in parallel — not at the end.
+3. Download the Camargo dataset, inspect one subject's file formats.
+4. Keep [`notes/`](notes/) current as you go.
 
 ---
 
-## 9. Reading list
+## 9. Phase ↔ old E-number map
 
-**Anchor and its dependencies**
-- Zhang, Jiang, Ajoudani, Tsagarakis (2026). IEEE T-ASE 23:44–58. *Read in full — done.*
-- **Peternel, Fang, Tsagarakis, Ajoudani (2019)**, Robot. Comput.-Integr. Manuf. 58:69–79 — Zhang's
-  ref **[27]**. *Read — done.* Per-muscle fatigue model, max-min endurance objective, muscle-group
-  redistribution. Teardown: [`peternel2019_teardown.md`](peternel2019_teardown.md).
-- **Reference implementation:** `gitlab.com/lukapeternel/PHRC` — the authors' own Python fatigue
-  model, with real parameter values. **E1 validates against this, not against the paper's prose.**
-  Notes and a confirmed bug: [`reference_implementation.md`](reference_implementation.md).
-- **Ma, Chablat, Bennis, Zhang, Guillaume (2010)**, *A new muscle fatigue and recovery model and its
-  ergonomics application in human simulation*, Virtual and Physical Prototyping 5(3):123–137 —
-  Peternel 2019's ref [42], cited as the source of alternative recovery rates. **Get this for E6.**
-- Peternel, Tsagarakis, Caldwell, Ajoudani (2018), Autonomous Robots 42(5):1011–1021 — Zhang's ref
-  **[17]**. Nice-to-have for the calibration protocol; **no longer on the critical path**, since the
-  model structure and `R = 0.5` are both confirmed in the reference code.
-- Ma, Chablat, Bennis, Zhang (2009), Int. J. Ind. Ergonom. 39(1):211–220 — their ref [24], the
-  dynamic fatigue model Peternel simplified.
-- Zhang, Ajoudani, Tsagarakis (2021), IEEE RA-L 6(4):8514–8521 — their ref [31], the Exo-Muscle
-  device paper. Source for actuator limits and device mass.
+Commits and notes before 2026-09-19 use E-numbers. Mapping for readability:
 
-**Comparators named in the paper**
-- Bergmann et al. (2025), IEEE Trans. Hum.-Mach. Syst. 55(1):10–22 — three-compartment fatigue in a
-  human-in-the-loop lower-limb exo controller. **Closest alternative approach; read it.**
-- Del-Ama et al. (2014), J. NeuroEng. Rehabil. 11:27 — hybrid FES-robot, torque-time integral.
-- Sheng et al. (2022), IEEE/ASME Trans. Mechatron. 27(4):1854–1862 — ultrasound-based fatigue.
+| Old | Now |
+|---|---|
+| E1 smoothed fatigue dynamics | **B2** — done |
+| E2 multi-joint allocation | **C** — core contribution |
+| E3 per-muscle fatigue | **B1** |
+| E4 full dynamics / walking | **A** — automatic, Moco does gait |
+| E5 gait-phase torque prediction | folded into C, minor |
+| E6 recovery-rate sensitivity | B3, supporting |
+| E7 cross-subject generalisation | **D3** |
+| E8 sparse GP | subsumed by **D** |
+| E9 synergy grouping | dropped — scooped by Lambeth et al. 2025 |
+| Gate R | **B4** |
 
-**Tooling**
-- Dembia et al. (2020), *OpenSim Moco*, PLoS Comput Biol.
-- Andersson, Gillis, Horn, Rawlings, Diehl (2019), *CasADi*, Math. Program. Comput. 11(1):1–36.
+---
 
-**Supporting**
-- Toffoli et al. (2026), Gait & Posture 130:110613 — time-to-exhaustion nearly tripled with a passive
-  exo (896 s vs 307 s); validates the endpoint and shows assistance shifts motor strategy.
-- Co, Begon, Bailly, Moissenet — FES optimal control scoping review. **Mine its references** for
-  fatigue-inside-optimal-control precedent.
+## 10. Reading
+
+Plain-language summaries of everything: [`notes/papers.md`](notes/papers.md).
+Teardowns: [`docs/mfac_teardown.md`](docs/mfac_teardown.md),
+[`docs/peternel2019_teardown.md`](docs/peternel2019_teardown.md).
+Literature screening: [`docs/gap_analysis.md`](docs/gap_analysis.md).
+
+**Essential for the phases ahead**
+- Dembia, Bianco, Falisse, Hicks, Delp (2020). *OpenSim Moco.* PLoS Comput Biol. — Phase A.
+- Dembia, Silder, Uchida, Hicks, Delp (2017). *Simulating ideal assistive devices…* PLoS ONE. —
+  the Phase A/C methodological template.
+- Peternel, Fang, Tsagarakis, Ajoudani (2019). RCIM 58:69–79. — per-muscle fatigue, max-min
+  objective, OpenSim static-optimisation pattern.
+- Camargo et al. (2021). J Biomech. — the dataset.
+- Rajagopal et al. (2016). IEEE TBME. — the 3D model for the headline result.
+
+**Outstanding**
+- Ma et al. (2010), Virtual Phys Prototyp 5(3):123–137 — recovery-rate values (B3).
+- Check **arXiv** for the smoothing claim; PubMed covers that literature badly.
+- Check preprint servers for scoop risk — unassessed, the available connector has no text search.

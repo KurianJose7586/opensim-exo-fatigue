@@ -7,7 +7,42 @@ mentor asks "why did you do it that way", the answer is here.
 
 ## Project framing
 
+### 2026-09-19: REALIGNED TO THE TITLE — read this first
+
+The extension-of-Zhang framing (below) produced good validated work but drifted off three terms of
+the project title: OpenSim Moco, AI-Driven, and Lower-Limb.
+
+**Why it drifted, and it was structural rather than careless.** Zhang et al. sell *avoiding*
+musculoskeletal modelling as a feature of their method. Reproducing their controller faithfully
+meant inheriting that avoidance, so there was never a reason to open OpenSim. Their work is
+single-joint, so nothing pushed toward hip/knee/ankle. And their only machine-learning component is
+a regression we bypassed entirely by using their published numbers directly.
+
+**The fix:** the title is the specification. The papers are component sources and validation
+targets, not the frame.
+
+- OpenSim Moco becomes the core — it produces the per-muscle forces the fatigue layer consumes
+- Lower-limb means hip, knee and ankle, with muscles spanning two joints as the mechanism
+- The AI becomes structurally necessary rather than decorative: fatigue-aware allocation must
+  evaluate many assistance profiles, each needing a Moco solve taking minutes, inside a loop that
+  must run in milliseconds. The surrogate is what closes that loop
+
+**Nothing built so far is wasted.** The smoothed fatigue model becomes the fatigue layer's enabler,
+the calibration becomes the personalisation method, and the reproduced controller becomes both the
+single-joint baseline and the proof the fatigue layer is correct.
+
+**What I got wrong:** when we pivoted to the extension framing, the original plan's learned-surrogate
+component was dropped and nothing replaced it. That silently removed the AI half of the title, and I
+did not flag the trade at the time. Worth remembering as a failure mode — a pivot that improves one
+axis can quietly cost another.
+
+Old guide archived at `docs/guide_v2_extension_framing.md`.
+
+---
+
 ### Extend a published paper rather than claim independent novelty
+*(superseded by the realignment above — kept because the reasoning still applies to how the papers
+are used)*
 
 The first plan assembled five known techniques into one pipeline. That is competent engineering and
 an unpublishable paper — a reviewer asks what is new and the honest answer would have been "the
@@ -55,6 +90,13 @@ people, with unhelpful error messages.
 
 Anchoring to their controller instead means fatigue lives in our own optimisation problem. **The C++
 requirement disappeared entirely.**
+
+**This survives the realignment, and it is the key de-risking fact of the whole project.** The new
+architecture is two layers: OpenSim Moco produces per-muscle forces, and our own CasADi layer carries
+the fatigue states and the allocation optimisation on top. So OpenSim is used properly and centrally
+— it does the musculoskeletal work — without ever needing a custom compiled component. This is also
+exactly the pattern Peternel et al. 2019 used (OpenSim offline for muscle forces, their own
+controller online), so there is a published precedent for the split.
 
 ### Give both controllers perfect future knowledge for the E1 comparison
 

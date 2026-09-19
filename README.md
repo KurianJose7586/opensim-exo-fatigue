@@ -1,7 +1,9 @@
 # AI-Driven Human–Exoskeleton Digital Twin
 
-Simulation-based extension of the muscle fatigue-aware exoskeleton controller of
-Zhang et al. (2026) to multi-joint, per-muscle, differentiable fatigue dynamics.
+A musculoskeletal digital twin in OpenSim Moco, scaled to a subject, carrying per-muscle fatigue
+dynamics and a lower-limb exoskeleton, used to work out how assistance should be allocated across
+hip, knee and ankle as the person tires — with a learned surrogate standing in for the expensive
+simulation so the loop can close in real time.
 
 **Start here:** [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) — research question, extension set, stages.
 
@@ -9,15 +11,17 @@ Zhang et al. (2026) to multi-joint, per-muscle, differentiable fatigue dynamics.
 
 ## Status
 
-**E1 complete. Gate R passed.**
+**Phase B (fatigue layer) built and validated. Phase A (the OpenSim twin) not started.**
 
-- `src/fatigue/model.py` — smoothed fatigue dynamics, exact at k=0, converging as k shrinks
-- `src/fatigue/calibrate.py` — C_F fitted on one trial predicts the other two to 0.6%
-- `src/mpc/mfac.py` — MFAC reimplemented in CasADi, reproduces their MFAC trial to 1.7%
-- `src/mpc/periodic.py` — **E1 result:** freezing the branch is benign at their 0.1 s horizon but
-  caps planning horizon near 0.05·C_F; by 0.5 s it costs 0.215 peak error in p, 72% of p_max
+- `src/fatigue/model.py` — smoothed fatigue dynamics, exact against the authors' own code at k=0
+- `src/fatigue/calibrate.py` — per-subject constant fitted on one trial predicts two held-out
+  trials to 0.6%
+- `src/mpc/mfac.py` — Zhang et al.'s controller in CasADi, reproduces their trial to 1.7%.
+  This is the single-joint baseline Phase C has to beat
+- `src/mpc/periodic.py` — the published method caps its planning horizon at ~0.05·C_F, which is
+  why multi-joint allocation needs the smoothed form
 
-Next: E3 (per-muscle fatigue states).
+**Next: Phase A — install OpenSim, build the musculoskeletal twin.** Nothing else starts first.
 
 ## Layout
 
