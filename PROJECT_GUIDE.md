@@ -277,8 +277,15 @@ the MATLAB API set up alongside the Python one.
 | **D3 model-based RL** | ❌ | ✅ millions of rollouts, fast only because it runs in the surrogate |
 | Multi-subject 3D, uncertainty sweeps | ❌ | ✅ |
 
-**Find out before scoping D1:** core count and queue limits, wall-clock cap per job, whether GPU
-nodes exist, and whether MATLAB is licensed on the nodes. Those four answers pick the tier.
+**The HPC is Kubernetes, not Slurm** — standard allocation is 8 CPU, 16 GiB, 1 GPU, NGC PyTorch
+image. Batch primitive is an Indexed Job, not `sbatch --array`. At 8 cores D1 Tier 1 is ~8 hours,
+Tier 2 ~3 days, Tier 3 does not fit on one pod.
+
+Analysis, blockers and a draft request: [`docs/hpc_request.md`](docs/hpc_request.md).
+
+**Two blockers to resolve before requesting anything:** the provided image has PyTorch but **not
+OpenSim**, and the home volume is a node-local `hostPath` with unknown quota against an expected
+25–100 GB of output.
 
 **Phase A's recorded solve time determines Phase D's feasibility.** At 30 min/solve the dataset is
 months; at 90 s it is a weekend. Develop on the reduced 2D model, reproduce the headline result on
