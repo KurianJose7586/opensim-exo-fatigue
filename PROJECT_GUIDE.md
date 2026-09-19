@@ -5,7 +5,7 @@
 Semi-Rigid Knee Exoskeleton*, IEEE T-ASE 23:44–58. Full teardown in
 [`docs/mfac_teardown.md`](mfac_teardown.md).
 
-**Scope:** simulation only · **Compute:** laptop-sufficient · **Status:** E1 validation done, Gate R next
+**Scope:** simulation only · **Compute:** laptop-sufficient · **Status:** E1 complete, Gate R passed
 
 ---
 
@@ -59,7 +59,7 @@ value-per-effort, not by dependency.
 
 | ID | Extension | Origin | Depth | Effort |
 |---|---|---|---|---|
-| **E1** | Smooth, differentiable fatigue dynamics across the decay/recovery threshold | W1 (their hack) | High | **Low** |
+| **E1** | Smooth, differentiable fatigue dynamics across the decay/recovery threshold | W1 (their hack) | High | **DONE** |
 | **E2** | Continuous optimal multi-DoF allocation with biarticular coupling | FW3 | **Highest** | High |
 | **E3** | Per-muscle fatigue states replacing the scalar index | W4 | High | **Low** |
 | **E4** | Full dynamics + walking instead of quasi-static squats | W2 | Medium | Medium |
@@ -67,11 +67,16 @@ value-per-effort, not by dependency.
 | **E6** | Recovery-rate identification and sensitivity analysis | W5 | Medium | **Low** |
 | **E7** | Cross-subject generalization of the activation model | FW2 | Medium | Medium |
 | **E8** | Sparse/variational GP replacing exact GPR | FW1 | Low | **Low** |
-| **E9** | Scalable muscle grouping via synergy extraction | Peternel 2019 §2.4.2 | Medium | Medium |
+| ~~E9~~ | ~~Synergy-based muscle grouping~~ — **scooped**, Lambeth et al. 2025 did it. Use the technique, cite them, drop the claim | — | — | — |
 
 **Recommended core:** E1 + E3 + E2, in that order. That is a coherent paper — *"per-muscle,
-multi-joint, differentiable fatigue-aware assistance"* — with E5, E6 and E9 as supporting sections
-that cost little.
+multi-joint, differentiable fatigue-aware assistance"* — with E5 and E6 as supporting sections.
+
+> **PubMed sweep 2026-09-19 (see [`gap_analysis.md`](gap_analysis.md)):** E1 is clear — one
+> irrelevant hit in the whole index. E2 is narrowed: Lambeth et al. 2025 and Bao et al. 2020 already
+> do fatigue-driven multi-joint allocation, but for *hybrid FES* exoskeletons with FES-induced
+> fatigue. **Biarticular coupling remains open** (3 hits, all pre-2006) and is now E2's stated wedge.
+> E9 is scooped outright. **E1 is the strongest surviving novelty claim — lead with it.**
 
 > **Read [`peternel2019_teardown.md`](peternel2019_teardown.md) before starting.** It changes E2 and
 > E3 substantially: the per-muscle fatigue model already exists (published 2019, same group), and

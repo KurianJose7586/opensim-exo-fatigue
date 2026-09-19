@@ -87,25 +87,36 @@ def policy(w_r, CF, R=0.5, M_th=0.05, n=40, **kw):
     m = MFAC(CF=CF, R=R, M_th=M_th, w_r=w_r, dF_max=1e9, **kw)
     Vs = np.linspace(0.0, V_TH, n)
     ps = [m.step(V, TAU, R_E, L_A, 5.0) for V in Vs]
-    return lambda V, F=None: float(np.interp(V, Vs, ps))
+    return lambda V, F=None, t=None: float(np.interp(V, Vs, ps))
 
 
-def simulate(control, CF, R=0.5, M_th=0.05, dt=0.01, t_max=200.0):
-    """Hold the squat until V reaches 0.8. control(V, F_prev) -> p."""
+def simulate(control, CF, R=0.5, M_th=0.05, dt=0.01, t_max=200.0,
+             tau=None, V_stop=V_TH, V0=0.0):
+    """Run until V reaches V_stop or t_max. control(V, F_prev, t) -> p.
+
+    tau: None for the isometric hold, else tau(t) -> knee torque [Nm].
+    Returns (time_to_V_stop or nan, p trace, V trace).
+    """
     from pathlib import Path
     import sys
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "fatigue"))
     from model import dV
 
-    V, F_prev, ps = 0.0, 5.0, []
+    tau_of = (lambda t: TAU) if tau is None else tau
+    V, F_prev, ps, Vs, t_hit = V0, 5.0, [], [], np.nan
     for i in range(int(t_max / dt)):
-        p = control(V, F_prev)
+        t = i * dt
+        tq = tau_of(t)
+        p = control(V, F_prev, t)
         ps.append(p)
-        F_prev = max(p * TAU / L_A, 5.0)
-        V = float(V + dV(V, TAU * (1 - p) / R_E, CF, R, M_th) * dt)
-        if V >= V_TH:
-            return i * dt, np.array(ps)
-    return np.nan, np.array(ps)
+        Vs.append(V)
+        F_prev = max(p * tq / L_A, 5.0)
+        V = float(V + dV(V, tq * (1 - p) / R_E, CF, R, M_th) * dt)
+        if V >= V_stop and np.isnan(t_hit):
+            t_hit = t
+            if tau is None:
+                break
+    return t_hit, np.array(ps), np.array(Vs)
 
 
 if __name__ == "__main__":
@@ -116,14 +127,14 @@ if __name__ == "__main__":
 
     print(f"L_a({THETA:.0f} deg) = {L_A:.4f} m   R_e = {R_E:.1f}   "
           f"F_max binds at p = {180 * L_A / TAU:.3f}")
-    runs = {"no assistance": lambda V, F: 0.0,
-            "constant 15%":  lambda V, F: 0.15,
+    runs = {"no assistance": lambda V, F, t: 0.0,
+            "constant 15%":  lambda V, F, t: 0.15,
             "MFAC":          policy(W_R, CF)}
     print()
     print(f"{'trial':<16}{'paper':>8}{'sim':>8}{'err':>8}{'mean p':>9}{'final p':>9}")
     out = {}
     for name, ctl in runs.items():
-        t, ps = simulate(ctl, CF)
+        t, ps, _ = simulate(ctl, CF)
         out[name] = (t, ps)
         print(f"  {name:<16}{paper[name]:>8.2f}{t:>8.2f}"
               f"{(t - paper[name]) / paper[name]:>7.1%}{ps.mean():>9.3f}{ps[-1]:>9.3f}")

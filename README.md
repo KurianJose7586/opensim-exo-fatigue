@@ -9,10 +9,15 @@ Zhang et al. (2026) to multi-joint, per-muscle, differentiable fatigue dynamics.
 
 ## Status
 
-**E1 (smooth fatigue dynamics): validation done.** `python src/fatigue/model.py` reproduces the
-reference implementation exactly at k=0 and converges to it as k shrinks.
-Remaining E1 work — measuring what Zhang et al.'s frozen branch actually costs — needs the MFAC
-reimplementation, so it sits with Gate R. Next: Gate R.
+**E1 complete. Gate R passed.**
+
+- `src/fatigue/model.py` — smoothed fatigue dynamics, exact at k=0, converging as k shrinks
+- `src/fatigue/calibrate.py` — C_F fitted on one trial predicts the other two to 0.6%
+- `src/mpc/mfac.py` — MFAC reimplemented in CasADi, reproduces their MFAC trial to 1.7%
+- `src/mpc/periodic.py` — **E1 result:** freezing the branch is benign at their 0.1 s horizon but
+  caps planning horizon near 0.05·C_F; by 0.5 s it costs 0.215 peak error in p, 72% of p_max
+
+Next: E3 (per-muscle fatigue states).
 
 ## Layout
 

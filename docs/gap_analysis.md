@@ -143,3 +143,94 @@ Mapping from the old tracks:
 | C1 — fatigue as differentiable states | **E1** — smoothing their frozen-branch hack. Same idea, concrete target, no C++ needed |
 | C2 — long-horizon multi-joint allocation | **E2** — multi-DoF allocation with biarticular coupling. Their own stated future work (FW3) |
 | C3 — EMG-free fatigue observer | **Dropped.** Zhang et al. did exactly this |
+
+---
+
+# PubMed sweep — 2026-09-19
+
+Searched via PubMed. All DOI links below point to the original articles.
+**Caveat on coverage:** PubMed indexes biomedical literature and covers engineering
+venues (IEEE, arXiv) poorly. The FES/optimal-control and CasADi/differentiable-simulation
+literature is under-represented here — see "Connector gaps" at the end.
+
+## Result by extension
+
+### E1 — smooth differentiable fatigue dynamics: **CLEAR**
+
+`(smooth OR differentiable OR continuous approximation) AND muscle fatigue model AND
+(optimal control OR nonlinear programming OR collocation OR gradient)`
+→ **1 hit total**, from 1999, unrelated.
+
+Nobody in the indexed biomedical literature has smoothed a muscle fatigue model to make it
+usable inside a gradient-based optimal control problem. E1's novelty claim holds.
+
+**Still to check:** the FES optimal-control literature lives in IEEE venues. Chase the Co et al.
+scoping review's reference list before finalising the claim.
+
+### E2 — multi-joint fatigue-based allocation: **SUBSTANTIALLY NARROWED**
+
+Two papers land close, both from Sharma's group:
+
+- **Lambeth, Hakam, Sharma (2025)**, IEEE TNSRE 33:3755–3769.
+  [10.1109/TNSRE.2025.3608567](https://doi.org/10.1109/TNSRE.2025.3608567)
+  Synergy-based MPC over hip, knee and ankle. Explicitly: *"A minimum number of synergies are
+  indeed necessary to truly achieve redistribution of control effort across the other actuators
+  when a primary muscle is fatigued."* **This is E2's core mechanism, already demonstrated.**
+- **Bao, Molazadeh, Dodson, Dicianno, Sharma (2020)**, IEEE TMRB 2(2):226–235.
+  [10.1109/TMRB.2020.2977416](https://doi.org/10.1109/TMRB.2020.2977416)
+  *"uses a person's muscle fatigue and recovery dynamics to determine an optimal ratio"* —
+  person-specific fatigue-driven control allocation, since 2020.
+
+**What still separates E2 from these:** both are **hybrid exoskeletons** allocating between FES
+and an electric motor. Their fatigue is *FES-induced*, which is far faster and physiologically
+different from volitional fatigue. Neither treats biological fatigue during volitional gait, and
+neither uses biarticular coupling as the allocation mechanism.
+
+**The wedge, and it survives:** `biarticular AND fatigue AND (exoskeleton OR assistance OR
+orthosis)` → **3 hits, all pre-2006.** Biarticular muscle coupling as the driver of fatigue-aware
+multi-joint assistance allocation is genuinely open.
+
+**Action:** reframe E2 around biarticular coupling explicitly, and cite Lambeth 2025 and Bao 2020
+as the closest prior work rather than discovering them at review.
+
+### E9 — synergy-based muscle grouping: **ANTICIPATED, DROP AS NOVELTY**
+
+Lambeth 2025 does exactly this — "artificial synergies" extracted per-subject for MPC
+dimensionality reduction, with a measured 28% computation saving. E9 is no longer a
+contribution. Keep the *technique*, cite them, stop calling it novel.
+
+## Also found — context and comparators
+
+- **Divekar, Thomas, Yerva, Frame, Gregg (2024)**, Science Robotics 9(94):eadr8282.
+  [10.1126/scirobotics.adr8282](https://doi.org/10.1126/scirobotics.adr8282)
+  Task-adaptive knee exoskeleton mitigating quadriceps fatigue across lifting/carrying/walking/
+  stairs, 10 users, no user-specific calibration. High-profile and directly adjacent to the anchor
+  paper — **must be cited and distinguished.**
+- **Bryan, Franks, Song, Reyes, O'Donovan, Gregorczyk, Collins (2021)**, J NeuroEng Rehabil 18:161.
+  [10.1186/s12984-021-00955-8](https://doi.org/10.1186/s12984-021-00955-8)
+  Human-in-the-loop optimised hip-knee-ankle assistance, 48% metabolic reduction. The multi-joint
+  whole-leg allocation precedent (fatigue-blind). Useful as E2's non-fatigue baseline.
+- **Romero-Sánchez, Bermejo-García, Barrios-Muriel, Alonso (2019)**, Front Neurorobot 13:58.
+  [10.3389/fnbot.2019.00058](https://doi.org/10.3389/fnbot.2019.00058)
+  Hip-knee-ankle hybrid orthosis, muscle-model inverse dynamics, actuation profiles adjusted for
+  FES-induced peak force reduction.
+
+## Revised track status
+
+| | Status after sweep |
+|---|---|
+| **E1** | **Clear.** 1 irrelevant hit. Strongest remaining novelty claim — promote to lead |
+| **E2** | **Narrowed but alive.** Core mechanism shown for hybrid/FES exos; biarticular route open |
+| **E3** | Unchanged — restoring Peternel 2019's per-muscle model, never claimed as novel |
+| **E9** | **Drop as novelty.** Lambeth 2025 did it. Use the technique, cite them |
+
+## Connector gaps — what this sweep could NOT check
+
+- **bioRxiv/medRxiv: no keyword search.** The connector filters by category and date only, so a
+  targeted scoop check is not possible through it. **Scoop risk is therefore UNASSESSED.**
+  Do this manually at biorxiv.org search, or via Google Scholar with a date filter.
+- **arXiv/alphaXiv unavailable in this session.** This matters: the CasADi / differentiable
+  simulation / MPC-methods side of E1 lives on arXiv and is exactly what PubMed misses. **E1's
+  "clear" verdict is provisional until arXiv is checked.**
+- **Elicit available**, not yet used — worth running for a structured extraction table across the
+  ~46 papers in the fatigue+optimal-control+wearable query.
