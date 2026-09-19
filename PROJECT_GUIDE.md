@@ -92,10 +92,18 @@ Nothing done so far is wasted. It all becomes the fatigue layer and the validati
 | `src/fatigue/model.py` — smoothed fatigue dynamics, exact at k=0 | **Phase B core.** The enabler: without it the fatigue layer cannot be optimised by gradients, and the allocation horizon is capped |
 | `src/fatigue/calibrate.py` — per-subject constant fitted, predicts held-out trials to 0.6% | **Phase B personalisation**, method already validated against real data |
 | `src/mpc/mfac.py` — their controller in CasADi, reproduces their trial to 1.7% | **The single-joint baseline** Phase C must beat, and proof our fatigue layer is correct |
-| `src/mpc/periodic.py` — frozen branch caps horizon at ~0.05·C_F | **The justification for Phase C.** Multi-joint allocation needs a long horizon; the published method cannot provide one |
+| `src/mpc/periodic.py` — frozen branch caps horizon at ~0.05·C_F | **The motivating experiment for Phase D.** Answers the reviewer question *"why RL rather than just a longer MPC horizon?"* — because the published formulation caps the usable horizon, measured. Demoted from contribution to motivation; the specific 0.05·C_F figure came from a single-joint quasi-static setup and may need re-measuring for multi-joint gait |
 
-That last row matters: the earlier work produced the argument for why the title's project is
-necessary. Keep it in the write-up as motivation, not as a separate contribution.
+Two things worth being explicit about.
+
+**`src/mpc/mfac.py` is the only link to measured human data in the entire project.** Everything
+downstream is simulation: a simulated twin, a learned surrogate of that twin, a policy trained inside
+the surrogate — three layers of abstraction from a real person. Reproducing Zhang et al.'s published
+experimental numbers to 1.7% is what keeps the work falsifiable. Do not let it rot.
+
+**`periodic.py` was demoted**, honestly. It was the headline result under the previous framing; it is
+now the motivating experiment that justifies why Phase D needs RL. Still necessary, no longer the
+contribution.
 
 ---
 
