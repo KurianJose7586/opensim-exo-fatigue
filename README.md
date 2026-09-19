@@ -22,6 +22,7 @@ Next: E3 (per-muscle fatigue states).
 ## Layout
 
 ```
+notes/      rough running log: findings, results, observations, decisions
 docs/       teardowns of the anchor papers, gap analysis
 src/        code, one directory per extension area
 models/     OpenSim models: base / scaled to subject / with exoskeleton
@@ -59,6 +60,7 @@ Parameter values and a confirmed `range(2)` bug:
 | File | What it is |
 |---|---|
 | [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) | The plan |
+| [`notes/`](notes/) | **Running log — read this when writing up** |
 | [`docs/mfac_teardown.md`](docs/mfac_teardown.md) | Anchor paper, full read |
 | [`docs/peternel2019_teardown.md`](docs/peternel2019_teardown.md) | Per-muscle model + redistribution precedent |
 | [`docs/reference_implementation.md`](docs/reference_implementation.md) | The authors' code, parameters, bug |
