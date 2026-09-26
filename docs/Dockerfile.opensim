@@ -1,0 +1,42 @@
+# OpenSim image for the simulation stage (CPU-only, no GPU needed).
+#
+# NOT TESTED YET — a starting point for whoever builds images on the DGX, not a
+# finished recipe. The pinned Python version in particular needs checking against
+# whatever OpenSim release is current.
+#
+# Why this is separate from the PyTorch image:
+#   The simulation stage and the training stage never run in the same process.
+#   Simulation writes result files; training reads them later. Keeping them apart
+#   avoids forcing OpenSim's Python version onto the PyTorch environment.
+#
+# Build:  docker build -f Dockerfile.opensim -t <registry>/opensim:4.5 .
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        wget bzip2 ca-certificates git libgl1 libglu1-mesa libxi6 libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Miniconda — OpenSim is distributed as a conda package
+ENV CONDA_DIR=/opt/conda
+RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/mc.sh \
+    && bash /tmp/mc.sh -b -p $CONDA_DIR && rm /tmp/mc.sh
+ENV PATH=$CONDA_DIR/bin:$PATH
+
+# CHECK THIS: OpenSim's conda package supports a limited set of Python versions,
+# and the supported range moves between releases. Confirm against
+# https://anaconda.org/opensim-org/opensim before building.
+RUN conda create -y -n opensim python=3.11 \
+    && conda install -y -n opensim -c opensim-org opensim \
+    && conda install -y -n opensim -c conda-forge numpy scipy casadi pandas pyyaml \
+    && conda clean -afy
+
+ENV PATH=$CONDA_DIR/envs/opensim/bin:$PATH
+
+# Fail the build rather than the job if the API is not importable
+RUN python -c "import opensim; print('OpenSim', opensim.GetVersion())"
+
+WORKDIR /work
+CMD ["/bin/bash"]
