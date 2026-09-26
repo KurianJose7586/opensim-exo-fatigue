@@ -51,10 +51,14 @@ unblock this. The second is probably less work for you.
 
 **2. Storage quota — I need to know before I start rather than after.**
 
-The simulation stage will generate somewhere between 25 and 100 GB of intermediate results. The home
-volume is mounted from the node rather than networked, so I would rather check the quota now than
-discover it partway through a multi-day run. If a networked volume is available instead, that would
-be better — it would also survive the pod being rescheduled.
+I expect under 10 GB if I write the results in a compressed format, which I intend to. It could
+reach 100 GB only if I ran the full sweep on the detailed model in the simulator's default plain-text
+output, and I would convert well before that became an issue.
+
+I mainly want to know the quota so I can size the run to it rather than discover the limit partway
+through a multi-day job. The home volume is also mounted from the node rather than networked — if a
+networked volume is available, that would be better, since it would survive the pod being
+rescheduled.
 
 **3. CPU allocation — not blocking, but it caps what I can produce.**
 
