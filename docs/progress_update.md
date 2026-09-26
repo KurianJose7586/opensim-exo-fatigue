@@ -30,23 +30,45 @@ through when you have time.
 
 **Next up** is building the musculoskeletal model in OpenSim. That is the main remaining setup.
 
-**Two things I need from you:**
+**Blockers — one of these stops me completely, the others shape how far I can take it.**
 
-1. **A container image with OpenSim.** The PyTorch image we have does not include it. I have put a
-   draft Dockerfile in the repo under `docs/`. Two notes that should make it easier: OpenSim and
-   PyTorch never need to run together — the simulation stage writes files, the training stage reads
-   them — so separate images or separate environments are fine, whichever is simpler for you. And
-   OpenSim needs a specific Python version, so keeping it isolated avoids breaking the PyTorch side.
+**1. OpenSim is not in our container image. This one is a hard stop.**
 
-2. **More CPU for one stage, and I can give the GPU back.** The simulation stage runs thousands of
-   independent jobs and is **CPU-only — it never touches the GPU.** On the standard 8-core pod it
-   would take days while holding a GPU idle. With 32–64 cores and no GPU it drops to hours, and the
-   GPU stays free for everyone else. I would also like to run it as a batch job rather than a
-   long-lived pod, so it can be scheduled around other users and restarted if it stops.
+The next stage is the musculoskeletal simulation, and it cannot run on the cluster at all until
+OpenSim is in an image. I cannot add it myself since image building sits with you.
 
-One question: what is the storage quota on the home volume? I expect to generate somewhere between
-25 and 100 GB of intermediate results, and I noticed it is mounted from the node rather than
-networked, so I want to check that before I start rather than after.
+I have put a draft Dockerfile in the repo at `docs/Dockerfile.opensim`. Two things that should make
+it simpler:
+
+- OpenSim and PyTorch never run in the same process. The simulation stage writes result files; the
+  training stage reads them later. So separate images are completely fine — they do not need to
+  coexist.
+- OpenSim needs a specific Python version, so keeping it in its own image avoids disturbing the
+  PyTorch setup.
+
+Either building it, or giving me push access to the registry so I can iterate on it myself, would
+unblock this. The second is probably less work for you.
+
+**2. Storage quota — I need to know before I start rather than after.**
+
+The simulation stage will generate somewhere between 25 and 100 GB of intermediate results. The home
+volume is mounted from the node rather than networked, so I would rather check the quota now than
+discover it partway through a multi-day run. If a networked volume is available instead, that would
+be better — it would also survive the pod being rescheduled.
+
+**3. CPU allocation — not blocking, but it caps what I can produce.**
+
+To be straight about this one: I can run it as things stand. It is a constraint, not a wall.
+
+The simulation stage is thousands of independent jobs and is **CPU-only — it never touches the
+GPU.** On the standard 8-core pod it takes days, and holds a GPU idle throughout for no reason. With
+32–64 cores and no GPU it drops to hours and hands the GPU back to the pool.
+
+I would also prefer to run it as a batch job rather than a long-lived pod, so it can be scheduled
+around other users and restart if it is interrupted.
+
+Whatever is easiest on your side is fine — I mainly wanted to flag that the current shape reserves a
+GPU for days doing nothing with it.
 
 On MATLAB — no rush needed yet, but I will need it from the next stage rather than at the end, so
 whenever it suits you.
