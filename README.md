@@ -5,7 +5,8 @@ dynamics and a lower-limb exoskeleton, used to work out how assistance should be
 hip, knee and ankle as the person tires — with a learned surrogate standing in for the expensive
 simulation so the loop can close in real time.
 
-**Start here:** [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) — research question, extension set, stages.
+**New here?** Start with [`ONBOARDING.md`](ONBOARDING.md) — setup, reading order, and what to pick up.
+**Already up to speed?** [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) is the plan.
 
 ---
 
@@ -37,8 +38,9 @@ refs/       papers, kept locally                        (gitignored)
 external/   third-party reference code (see NOTICE)
 ```
 
-`src/` areas: `fatigue/` (E1) · `mpc/` (MFAC reimplementation) · `musculoskeletal/` (OpenSim
-pipeline) · `allocation/` (E2) · `activation/` (GPR) · `jobs/` (batch wrappers)
+`src/` areas: `fatigue/` (Phase B, built) · `mpc/` (published baseline, built) ·
+`musculoskeletal/` (Phase A, OpenSim pipeline) · `allocation/` (Phase C, multi-joint) ·
+`activation/` + `jobs/` (Phase D, learned model and batch runs)
 
 ## Setup
 
@@ -46,14 +48,15 @@ pipeline) · `allocation/` (E2) · `activation/` (GPR) · `jobs/` (batch wrapper
 python -m venv .venv && .venv/Scripts/activate && pip install -r requirements.txt
 ```
 
-OpenSim is **not** pip-installable — install it separately (4.5+, Moco is bundled) and add its
-Python API to the environment. See the guide, Stage S2.
+Use `python -m pip`, not bare `pip`. OpenSim is **not** pip-installable — install it separately
+(4.5+, Moco is bundled) and add its Python API. Not needed for anything currently in the repo.
+Full setup notes and known gotchas: [`ONBOARDING.md`](ONBOARDING.md).
 
 ## Reference code
 
-`external/PHRC/` holds the authors' fatigue-model implementation, included unmodified as the
-validation baseline for E1. **Do not edit it** — our own implementations go in `src/fatigue/`,
-written from the published equations.
+`external/PHRC/` holds the authors' fatigue-model implementation, included unmodified as our
+validation baseline. **Do not edit it** — our own implementations go in `src/fatigue/`, written from
+the published equations. Editing it would destroy our ability to prove those are correct.
 
 Provenance and licensing: [`external/PHRC/NOTICE.md`](external/PHRC/NOTICE.md).
 Parameter values and a confirmed `range(2)` bug:
@@ -63,6 +66,7 @@ Parameter values and a confirmed `range(2)` bug:
 
 | File | What it is |
 |---|---|
+| [`ONBOARDING.md`](ONBOARDING.md) | **Start here if you are new** |
 | [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) | The plan |
 | [`notes/`](notes/) | **Running log — read this when writing up** |
 | [`docs/mfac_teardown.md`](docs/mfac_teardown.md) | Anchor paper, full read |
