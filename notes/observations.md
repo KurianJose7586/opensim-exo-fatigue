@@ -157,6 +157,65 @@ built.
 - Writing long files through shell heredocs kept mangling backslash sequences and broke source files
   twice. Use a file-writing tool for anything long.
 
+### OpenSim on Windows: four traps, all hit on 2026-10-02
+
+1. **Conda `casadi` in the same env breaks Moco.** Moco bundles its own CasADi. A second copy
+   from conda-forge loads first and fails inside Moco with `'get_forward' not defined for
+   CallbackInternal`. Do not install casadi from conda into the OpenSim env (pip is fine,
+   because its DLLs stay inside site-packages).
+2. **MKL overwrites OpenSim's bundled Intel runtime.** numpy's default BLAS on Windows pulls in
+   MKL, which replaces `svml_dispmd.dll` with a version missing `__svml_log2`, and IPOPT fails
+   to load (`WinError 182`, reported as "Plugin 'ipopt' is not found"). Fix: create the env
+   with `"libblas=*=*openblas"`. The env must also be *activated* (`micromamba run`), or the
+   plugin DLLs are not on PATH.
+3. **`inv.solve().getMocoSolution()` crashes Python** (access violation). The solution is a
+   reference into the temporary MocoInverseSolution, so that object has to stay alive.
+4. **PrescribedController + MocoInverse = infeasible**, even with zero torque prescribed. See
+   decisions.md for the body-torque workaround.
+
+### Twin bugs caught by sanity checks, not by the solver (2026-10-02)
+
+Every one of these still reported "EXIT: Optimal Solution Found":
+
+- **Subject scaling did nothing.** `2D_gait.osim` keeps all its forces at the model root, and
+  `getForceSet()` is empty (as is `getMuscles()`). The strength and contact-stiffness loops
+  iterated an empty set. Caught by asking why muscle activations ignored assistance. Fixed with
+  a path-based component search plus a self-check (`twin._check_scaling`).
+- **Activations not optimised.** Pelvis residuals and lumbarAct dominated the objective, so at
+  tolerance 1e-3 the muscles stayed where they started. Caught by the test "p = 1 must zero the
+  muscles". See decisions.md.
+- **Exo delivered less torque than intended** (prescribed body-torque version). Caught by an ID
+  re-solve with the exo applied. Replaced, not patched.
+- **The problem changed with p** (reserves skipped under the exo), so p = 0.3 was infeasible.
+
+Lesson for the write-up: a converged optimiser proves nothing about the model. The checks that
+caught these were physical ("full assistance must unload the muscles", "scaling must change
+the parameters"), and they are now in the self-checks.
+
+### Open flags on the twin
+
+- **Joint reserves are 7 Nm RMS unassisted** and do not shrink at tighter tolerance, even though
+  no muscle exceeds 57% activation. Likely rigid-tendon fibers off their force-length plateau at
+  some phases. A real limitation of this reduced model; report it. Tendon compliance would be
+  the thing to try.
+- **Soleus barely responds to ankle assistance** (−7% at 30% capacity; 0.062 even at p = 1 where
+  other muscles reach 0.01–0.02). Gastroc and tib_ant respond normally. Unexplained. Look before
+  any ankle claim goes into the paper.
+
+### Parallel Moco workers in one directory (suspected, 1 failure in 18)
+
+Moco writes `delete_this_to_stop_optimization_<timestamp>.txt` into the working directory and
+polls for it every iteration. If the file is gone, the solve stops. One smoke task failed with
+CasADi's `intermediate_callback` erroring, which is consistent with parallel workers in a shared
+cwd tripping each other's files. Not proven. Each worker now runs in its own directory, and
+`--retry-failed` reruns any failures.
+
+### The laptop is the bottleneck, not the method
+
+7.3 GB of RAM. Six parallel Moco workers plus anything else exhausts it (OpenBLAS allocation
+failures). A single twin evaluation takes 67 s alone and 100–300 s with six in parallel.
+Development only. The DGX does the sweeps.
+
 ---
 
 ## Open questions
@@ -165,7 +224,8 @@ built.
 - [ ] Confirm the tiring-rate constant is on the same scale between our calibration and the demo
       code values (15-20 there, 8.24 from our fit). Units need checking before values are reused.
 - [ ] Does the frozen-switch cap move if the person tires faster or slower? We fixed one tiring rate.
-- [ ] Get Ma et al. 2010 for published recovery-rate values (E6).
+- [ ] Get Ma et al. 2010 for published recovery-rate values (E6). **Now critical: R sets
+      the gait fatigue equilibrium, so every Phase C/D number scales with it.**
 - [ ] Check arXiv for the smoothing claim — PubMed covers that literature badly.
 - [ ] Check preprint servers for scoop risk. Not possible through the connector available here.
 - [ ] Email Peternel: fitted constants, the Exo-Muscle model file, and permission to include the code.

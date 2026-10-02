@@ -12,17 +12,23 @@ simulation so the loop can close in real time.
 
 ## Status
 
-**Phase B (fatigue layer) built and validated. Phase A (the OpenSim twin) not started.**
+**Whole pipeline built and smoke-tested end to end (2026-10-02). What remains is DGX compute.**
+Runbook for the supervisor: [`docs/RUN_ON_DGX.md`](docs/RUN_ON_DGX.md) — one image, one script.
 
-- `src/fatigue/model.py` — smoothed fatigue dynamics, exact against the authors' own code at k=0
-- `src/fatigue/calibrate.py` — per-subject constant fitted on one trial predicts two held-out
-  trials to 0.6%
-- `src/mpc/mfac.py` — Zhang et al.'s controller in CasADi, reproduces their trial to 1.7%.
-  This is the single-joint baseline Phase C has to beat
-- `src/mpc/periodic.py` — the published method caps its planning horizon at ~0.05·C_F, which is
-  why multi-joint allocation needs the smoothed form
+| Phase | Code | State |
+|---|---|---|
+| A — OpenSim twin | `src/musculoskeletal/twin.py` | **Gate A passed.** 2D model + 3-joint exo + device mass, MocoInverse converges, 26–42 s per evaluation on a laptop |
+| B — fatigue | `src/fatigue/` | Validated earlier (bit-exact vs authors' code; 0.6% held-out) |
+| C — allocation | `src/allocation/` | 5 controllers, equal budget. Toy plant passes; real twin grid = `run_pipeline.sh phase_c` |
+| D1 — dataset | `src/jobs/sweep.py`, `configs/` | Resumable sharded sweep; smoke tier 18/18 converged, 6 KB per solve |
+| D2 — surrogate | `src/activation/surrogate.py` | Ensemble, subject-held-out split; R² 0.999 on toy, runs on twin data |
+| D3 — RL policy | `src/activation/policy.py` | SAC in the surrogate, disagreement penalty; runs end to end |
+| D4 — validation | `src/activation/validate.py` | Closed loop against the twin, benefit retention, latency |
+| E — MATLAB | — | Supervisor's track |
 
-**Next: Phase A — install OpenSim, build the musculoskeletal twin.** Nothing else starts first.
+Not done, needs a person: Camargo data loading and per-subject scaling (supervisor), the B4
+squat re-validation through OpenSim, the arXiv novelty check, and the R = 0.5 recovery-rate source
+(now critical — see `notes/decisions.md`, "Gait objective").
 
 ## Layout
 
@@ -38,9 +44,9 @@ refs/       papers, kept locally                        (gitignored)
 external/   third-party reference code (see NOTICE)
 ```
 
-`src/` areas: `fatigue/` (Phase B, built) · `mpc/` (published baseline, built) ·
-`musculoskeletal/` (Phase A, OpenSim pipeline) · `allocation/` (Phase C, multi-joint) ·
-`activation/` + `jobs/` (Phase D, learned model and batch runs)
+`src/` areas: `fatigue/` (B) · `mpc/` (published baseline) · `musculoskeletal/` (A) ·
+`allocation/` (C) · `jobs/` (D1 sweeps) · `activation/` (D2–D4).
+`configs/` sweep tiers · `deploy/` Kubernetes manifests · `run_pipeline.sh` every stage.
 
 ## Setup
 
@@ -48,9 +54,9 @@ external/   third-party reference code (see NOTICE)
 python -m venv .venv && .venv/Scripts/activate && pip install -r requirements.txt
 ```
 
-Use `python -m pip`, not bare `pip`. OpenSim is **not** pip-installable — install it separately
-(4.5+, Moco is bundled) and add its Python API. Not needed for anything currently in the repo.
-Full setup notes and known gotchas: [`ONBOARDING.md`](ONBOARDING.md).
+Use `python -m pip`, not bare `pip`. OpenSim is **not** pip-installable and needs its own
+Python 3.11 conda env — exact commands and the Windows traps in [`ONBOARDING.md`](ONBOARDING.md).
+On the DGX everything runs in one image: [`docs/RUN_ON_DGX.md`](docs/RUN_ON_DGX.md).
 
 ## Reference code
 
@@ -67,6 +73,7 @@ Parameter values and a confirmed `range(2)` bug:
 | File | What it is |
 |---|---|
 | [`ONBOARDING.md`](ONBOARDING.md) | **Start here if you are new** |
+| [`docs/RUN_ON_DGX.md`](docs/RUN_ON_DGX.md) | **Runbook for the DGX runs** |
 | [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) | The plan |
 | [`notes/`](notes/) | **Running log — read this when writing up** |
 | [`docs/mfac_teardown.md`](docs/mfac_teardown.md) | Anchor paper, full read |

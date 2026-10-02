@@ -266,3 +266,61 @@ simulation-methods work lives.
 
 **Not checked at all:** preprints. The bioRxiv connector only filters by subject area and date, with
 no text search, so scoop risk is unassessed.
+
+---
+
+## 5. Gate A: the OpenSim twin (`src/musculoskeletal/twin.py`, 2026-10-02)
+
+Reduced 2D model (gait10dof18musc), exo at hip/knee/ankle on both legs, 6.6 kg of device mass.
+One evaluation = two MocoInverse solves: an ID-equivalent solve for net joint moments, then the
+muscle solve with the assistance applied.
+
+**Solve time: 26 s per evaluation unassisted, 42 s assisted, laptop, single process**
+(after the objective fixes in decisions.md; it was 67 s before). This replaces the 90 s
+placeholder in every Phase D estimate.
+
+Ideal device with 30% capacity at every joint (final formulation, tolerance 1e-4). Mean
+activation over the cycle:
+
+```
+muscle        mean a, none   mean a, 30%   change
+hamstrings           0.086         0.028    -68%
+bifemsh              0.042         0.024    -43%
+glut_max             0.065         0.025    -62%
+iliopsoas            0.146         0.066    -55%
+rect_fem             0.079         0.049    -38%
+vasti                0.051         0.031    -40%
+gastroc              0.103         0.067    -35%
+soleus               0.103         0.096     -7%
+tib_ant              0.060         0.029    -51%
+```
+
+Joint reserves are 7.2 Nm RMS unassisted. Soleus barely responds. Both are open flags in
+observations.md.
+
+**The first version of this table was wrong.** Subject scaling was a no-op and the muscle
+activations were never really optimised, yet the solver still reported success. That version
+showed 3–30% reductions. See observations.md, "Twin bugs caught by sanity checks".
+
+**Storage: 6 KB per evaluation** (100×9 float32 activations plus metadata, compressed). The full
+100,000-solve tier is about 0.6 GB. The earlier 25–100 GB estimate assumed saving whole
+trajectories.
+
+## 6. Pipeline smoke test, end to end (2026-10-02)
+
+`configs/smoke.yaml`: 3 subjects × 2 conditions × 3 assistance levels = 18 twin evaluations.
+
+- **D1:** 18/18 converged, joint reserve RMS median 5.2 Nm
+- **D2:** held-out-subject R² 0.65 with only 2 training subjects (wiring check, not a result).
+  The toy self-check gives R² 0.999 with error/disagreement correlation 0.85, so the ensemble's
+  uncertainty is informative
+- **D3:** SAC trains and evaluates. 3k steps is untrained (−2% vs none); the DGX runs 300k
+- **D4:** closed loop against the twin works. Policy latency **2.3 ms vs 182 s** per twin
+  evaluation. In the smoke run the "coupled" controller planned through the weak surrogate
+  showed **retention −0.02**: the surrogate promised 0.218 → 0.165 and the twin delivered 0.223.
+  That is the surrogate-exploitation failure D4 exists to catch, caught at smoke scale.
+
+None of these are results. They show every stage runs and hands its output to the next.
+
+**These smoke numbers came from the pre-fix twin.** The pipeline was re-run after the fixes;
+see section 7.

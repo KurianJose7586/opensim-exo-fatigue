@@ -17,7 +17,8 @@ The catch: working out the best assistance takes minutes of computation, and the
 answer in milliseconds. So we train a neural network to do it instantly. That is the AI half, and it
 exists because the loop cannot close without it — not as decoration.
 
-**Current state: the fatigue half is built and tested. The simulation half has not started.**
+**Current state: every phase is built and smoke-tested end to end. The full-scale runs happen on
+the DGX — see [`docs/RUN_ON_DGX.md`](docs/RUN_ON_DGX.md).**
 
 ---
 
@@ -43,10 +44,18 @@ python src/fatigue/model.py       # 9 s
 
 - **Use `python -m pip`, not `pip`.** Kurian's Anaconda install is broken and the bare `pip`
   launcher fails. `python -m pip` works regardless.
-- **OpenSim is not pip-installable.** Install it separately from simtk.org, then run its Python API
-  setup script. Not needed for anything currently in the repo.
-- **OpenSim supports a limited Python range**, and 3.12 may be outside it. If so, make a separate
-  3.11 environment for OpenSim only. This is also why it gets its own container image on the cluster.
+- **OpenSim is not pip-installable.** It gets its own conda env, Python 3.11 (the newest the
+  4.6 build supports). Working recipe on Windows, with standalone micromamba, no Anaconda needed:
+
+  ```bash
+  micromamba create -n opensim -c opensim-org -c conda-forge python=3.11 opensim       "libblas=*=*openblas" numpy scipy pandas pyyaml matplotlib
+  micromamba run -n opensim python -m pip install torch gymnasium stable-baselines3
+  micromamba run -n opensim python src/musculoskeletal/twin.py     # Gate A, ~1-2 min
+  ```
+
+  Three traps, all hit (details in `notes/observations.md`): **use OpenBLAS**, because MKL breaks
+  OpenSim's IPOPT. **Never conda-install casadi** into this env, because Moco bundles its own.
+  **Run through `micromamba run`** (or an activated shell), or the solver plugins are not found.
 - **Background runs look like they produce nothing** — Python buffers. Use `python -u`.
 - `src/mpc/periodic.py` takes about four minutes. The other three are seconds.
 
@@ -114,7 +123,7 @@ Roughly ordered by value. Nothing here is blocked on anyone else.
 
 | Task | Notes |
 |---|---|
-| **Install OpenSim and get `exampleMocoTrack` converging** | The critical path. **Record how long the solve takes** — that one number sets the dataset size, the cluster request and the storage estimate, all of which currently rest on a guess |
+| **Recovery rate R = 0.5 — find its source (Ma et al. 2010 / Peternel 2018)** | Now the most important open number: under cyclic gait R sets the fatigue equilibrium, so every Phase C/D result scales with it. See `notes/decisions.md` |
 | **Download the Camargo dataset, inspect one subject** | Needed next regardless. Marker-set mismatch is the thing that reliably eats a week; better to find out now |
 | **Check arXiv for our main novelty claim** | We searched PubMed, which covers engineering badly. The claim is *provisional* until arXiv is checked. See [`docs/gap_analysis.md`](docs/gap_analysis.md) |
 | **Check preprint servers for scoop risk** | Completely unassessed — the tool we had has no text search |
@@ -126,15 +135,9 @@ Roughly ordered by value. Nothing here is blocked on anyone else.
 
 ## 7. Working on it
 
-Commits go under Kurian's identity for now — set this before your first commit:
-
-```bash
-git config user.name  "kurianjose7586"
-git config user.email "kurianjose005@gmail.com"
-```
-
-*(If you want your own commits attributed to you, agree that with Kurian first and change it — just
-do not do it silently.)*
+Commit under your own name. That was agreed with Kurian on 2026-10-02. Each person's work is
+attributed to them, so check `git config user.name` / `user.email` before your first commit.
+Work on a branch and merge into `main`, rather than committing to `main` directly.
 
 **Append to [`notes/`](notes/) as you go.** Findings in `results.md`, surprises and dead ends in
 `observations.md`, choices in `decisions.md`, papers in `papers.md`. It is deliberately rough. A

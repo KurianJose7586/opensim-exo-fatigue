@@ -3,12 +3,15 @@ numpy
 scipy
 matplotlib
 pandas
+pyyaml
 
-# E1 / MPC — same solver stack as Zhang et al. (CasADi + IPOPT) and OpenSim Moco
+# MPC baseline + fatigue layer -- same solver stack as Zhang et al. (CasADi + IPOPT)
 casadi
 
-# Activation model (GPR), E8 sparse GP, E9 synergy extraction (NMF)
-scikit-learn
+# Phase D: surrogate ensemble (D2) and RL policy (D3)
+torch
+gymnasium
+stable-baselines3
 
-# NOTE: OpenSim is not on PyPI. Install OpenSim 4.5+ separately (Moco is bundled)
-# and expose its Python API to this environment. See PROJECT_GUIDE.md, Stage S2.
+# NOTE: OpenSim is not on PyPI. It needs its own Python 3.11 conda env -- see
+# ONBOARDING.md section 2. On the DGX everything runs in docs/Dockerfile.opensim.

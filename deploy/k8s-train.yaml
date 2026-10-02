@@ -1,0 +1,35 @@
+# D2 + D3 + D4 after the D1 sweep is collected -- one GPU pod, runs them in order.
+# Only needed if the DGX is behind the cluster scheduler; otherwise run_pipeline.sh.
+#
+#   kubectl apply -f deploy/k8s-train.yaml
+#   kubectl logs -f job/train
+#
+# FILL IN the same <...> values as k8s-d1-sweep.yaml. D4 replays walks through the
+# twin, which is CPU-bound -- hence 32 CPUs alongside the GPU.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: train
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: train
+          image: <registry>/opensim-exo:4.6
+          workingDir: /work
+          command: ["bash", "-c",
+                    "bash run_pipeline.sh d2 d1_tier1 && bash run_pipeline.sh d3 d1_tier1 && bash run_pipeline.sh d4 d1_tier1"]
+          env:
+            - {name: WORKERS, value: "32"}
+          resources:
+            requests: {cpu: "32", memory: "64Gi", nvidia.com/gpu: 1}
+            limits:   {cpu: "32", memory: "64Gi", nvidia.com/gpu: 1}
+          volumeMounts:
+            - {name: repo, mountPath: /work}
+      volumes:
+        - name: repo
+          hostPath: {path: </home/user/opensim-exo-fatigue>, type: Directory}
+      nodeSelector:
+        kubernetes.io/hostname: <node-name>

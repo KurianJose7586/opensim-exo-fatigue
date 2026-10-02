@@ -1,0 +1,4 @@
+# Phase C: one nominal subject, full assistance grid. 5^3 = 125 twin evaluations.
+name: phase_c_grid
+grid_p: [0.0, 0.1, 0.2, 0.3, 0.4]
+load_kg: 0.0

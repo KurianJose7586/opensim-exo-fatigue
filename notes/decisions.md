@@ -187,5 +187,84 @@ its purpose. Fix things in our own code. The NOTICE file says so.
 
 ### Commit identity
 
-Everything as `kurianjose7586 / kurianjose005@gmail.com`. The first commit went out under a
-different address picked up from the environment and had to be rewritten.
+Until 2026-10-02 everything went in as `kurianjose7586 / kurianjose005@gmail.com`. The first
+commit went out under a different address picked up from the environment and had to be rewritten.
+
+**Changed 2026-10-02:** with two people on the project, each commits under their own name.
+Agreed with Kurian. Work goes on branches, not straight onto `main`.
+
+---
+
+## Pipeline build (2026-10-02)
+
+### Gait objective: minimise the worst muscle's fatigue, not time to V_th
+
+Under cyclic load the fatigue switch settles to an equilibrium: tiring while the muscle is on,
+recovering at R = 0.5 while it is off. With the lineage's R that equilibrium sits well below
+V_th = 0.8 for normal walking, so "time to V_th" is infinite and Peternel's max-min endurance
+(eq. 10) is undefined. Its cyclic analogue is minimising the worst muscle's fatigue (`peak_V`).
+
+**Side effect worth a sentence in the paper:** the equilibrium does not depend on the capacity
+C at all, only on the activation pattern, R and M_th. C sets how fast the equilibrium is
+approached. So the Phase C ranking does not rest on the unknown gait-muscle C. Verified on the
+toy plant: C = 8.2 and C = 100 both settle at 0.58.
+
+C is set to Zhang's fitted 8.2365 for every muscle, the only measured value we have. R stays
+0.5, and that matters much more now, because R sets the equilibrium. E6 (recovery-rate
+sensitivity) is promoted from supporting to necessary.
+
+### Exoskeleton = Dembia et al.'s ideal assistive device, capacity allocated per joint
+
+Each joint gets a torque actuator that the optimiser uses freely (effort weight 1e-3), capped at
+`|tau| <= p_j * peak|tau_net_j|`. Here `p_j` is the device's capacity at joint j, and Phase C
+allocates capacity under a shared budget. This is the Dembia, Silder, Uchida, Hicks, Delp (2017)
+formulation, the methodological template this guide already cites, so it is citable rather
+than invented.
+
+**Reversed twice in one day, and why.**
+1. First attempt: a prescribed `tau = p * tau_net(t)` through a PrescribedController. MocoInverse
+   was infeasible even at p = 0.
+2. Second attempt: the same prescribed torque applied as +/- body torques. An ID re-solve with
+   the device at p = 1 should leave zero joint torque. It left 15% (hip, knee) and 62% (ankle)
+   of the net moment, plus 3–5 Nm of noise. Cause not found. Abandoned rather than patched.
+3. The ideal device is a plain CoordinateActuator, so it is exact by construction and works for
+   the 3D model too.
+
+**What changes in meaning:** `p` is no longer "fraction of torque compensated" (Zhang's p). It is
+torque *capacity*, and the optimiser decides the profile. The single-joint baseline is still
+the same formulation with two capacities set to zero.
+
+### Moco objective hygiene: three rules, each learned from a wrong answer
+
+- **Price what muscles cannot change at ~0.** The pelvis residuals and the torso actuator
+  (`lumbarAct`) are fixed by the kinematics. At optimal force 1 they dominated the objective, and
+  at tolerance 1e-3 the muscle activations were never actually optimised (full assistance left
+  them unchanged). They now use optimal force 1000.
+- **Same reserves at every p.** `ModOpAddReserves` skips coordinates that already have an
+  actuator by default, so adding the exo silently removed the joint reserves and made p = 0.3
+  infeasible. They are now forced on everywhere.
+- **Tolerance 1e-4, not 1e-3.** At 1e-3, activations at p = 1 sat ~0.02 too high (0.035 against
+  0.016 at 1e-4). The fatigue threshold M_th = 0.05 is at exactly that scale, so solver noise
+  could flip fatigue and recovery modes. It is also faster after the first fix: 26 s unassisted.
+
+### Only the musculoskeletal map is learned; fatigue is integrated exactly
+
+The guide says D2 learns "musculoskeletal + fatigue dynamics". The fatigue ODE is known, smooth
+and differentiable, so learning it would only add error. The surrogate learns
+(subject, condition, p) -> activations, and the exact fatigue model runs on top. That is still
+end-to-end differentiable, and it is what makes D3's state transitions trustworthy apart from
+the surrogate itself.
+
+### Subject variation without re-scaling segment lengths
+
+D1 varies body mass, muscle strength, walking speed (time-scaled kinematics) and carried load.
+It does not vary segment lengths, because the reference kinematics belong to one body.
+Contact stiffness is scaled with total mass so that ground reaction scales with body weight
+(the contact law is linear in stiffness). Real per-subject geometry comes with the Camargo
+data (Phase A2), which is the supervisor's data-loading track.
+
+### One Docker image for every stage
+
+OpenSim, PyTorch and stable-baselines3 in one image, with the repo mounted rather than baked
+in. This reverses the earlier "separate images" plan. One image means one build and one
+`check`, and D4 needs OpenSim and the policy in the same process anyway.
