@@ -20,20 +20,26 @@ fast gait, where the equilibrium can exceed V_th.
 
 Every controller gets the same budget, sum(p) <= BUDGET, so differences come
 from WHERE the assistance goes, not how much. Each replan a controller picks p
-from a candidate grid by minimising
-
-    sum_i w_i * mean(a_i(p)^2) + LAM * |p|^2
-
-and the controllers differ only in what they know:
+from a candidate grid (+ LAM * |p|^2 effort penalty, same for all), and the
+controllers differ only in what they know:
 
   none          p = 0
-  knee_only     Zhang-style single joint, per-muscle weights, hip/ankle fixed at 0
+  knee_only     Zhang-style single joint: min sum_i w_i mean(a_i^2), w_i = 1/(V_m-V_i)^2
+                (their eq. 27 made per-muscle), hip/ankle fixed at 0
   independent   one controller per joint, each sees a SCALAR joint fatigue index
                 (max V of muscles crossing it, as Zhang do) and only its own
                 uniarticular muscles -- blind to biarticular cross-effects
-  blind         multi-joint, w_i = 1: allocates for effort, ignores fatigue
-  coupled       ours: w_i = 1/(V_m - V_i)^2 per muscle (Zhang eq. 27 made
-                per-muscle), sees every muscle including the biarticular ones
+  blind         multi-joint, min sum_i mean(a_i^2): allocates for effort, ignores fatigue
+  coupled       ours: min over p of the worst muscle's PREDICTED fatigue HORIZON
+                cycles ahead, from the current per-muscle state, through the
+                exact cycle map. Sees every muscle, including the biarticular
+                ones, and optimises the reported objective itself.
+
+The first version of `coupled` minimised the weighted sum of squares above
+(the knee_only cost on all three joints). On the twin it tied with blind and
+lost to independent (0.211 vs 0.204), because a weighted sum of squares is
+not the min-max objective being reported. The steady state is available in
+closed form (V* = B / (1 - A)), and the min-max optimum reached 0.186.
 
 ponytail: grid search over p, not a gradient solver. 3 dims, cheap, exact on
 the grid. Swap for CasADi through the smoothed model if the action space grows.
@@ -63,6 +69,8 @@ C_ZHANG = 8.2365
 BUDGET, P_MAX, LAM = 0.6, 0.4, 0.05
 MINUTES = 10.0
 CONTROLLERS = ("none", "knee_only", "independent", "blind", "coupled")
+HORIZON = 60   # cycles of look-ahead for `coupled`, ~1 min: about one fatigue time
+               # constant (C/M ~ 8/0.1 s). ponytail: fixed; tune if it matters.
 
 
 def candidates(step=0.05, budget=BUDGET, p_max=P_MAX):
@@ -116,9 +124,13 @@ def _idx(names):
 class Allocator:
     """Precomputes effort of every candidate once, then each decision is a dot product."""
 
-    def __init__(self, amap, P=None):
+    def __init__(self, amap, cycle_s, C=C_ZHANG, P=None):
         self.P = candidates() if P is None else P
-        self.S = np.array([np.mean(amap(p) ** 2, axis=0) for p in self.P])   # (n_cand, 9)
+        acts = [amap(p) for p in self.P]
+        self.S = np.array([np.mean(a ** 2, axis=0) for a in acts])           # (n_cand, 9)
+        A, B = zip(*(cycle_map(a, cycle_s, C) for a in acts))
+        AH = np.array(A) ** HORIZON
+        self.AH, self.BH = AH, np.array(B) * (1 - AH) / (1 - np.array(A))     # V_H = AH*V + BH
         self.reg = LAM * (self.P ** 2).sum(1)
 
     def __call__(self, kind, V):
@@ -127,9 +139,9 @@ class Allocator:
             return np.zeros(3)
         if kind == "blind":
             return P[np.argmin(S.sum(1) + self.reg)]
-        w = 1.0 / (V_M - np.minimum(V, V_M - 1e-3)) ** 2
         if kind == "coupled":
-            return P[np.argmin(S @ w + self.reg)]
+            return P[np.argmin((self.AH * V + self.BH).max(1) + self.reg)]
+        w = 1.0 / (V_M - np.minimum(V, V_M - 1e-3)) ** 2
         if kind == "knee_only":
             ok = (P[:, 0] == 0) & (P[:, 2] == 0)
             return P[ok][np.argmin(S[ok] @ w + self.reg[ok])]
@@ -167,7 +179,7 @@ def metrics(Vs, cycle_s):
 
 
 def compare(amap, cycle_s, C=C_ZHANG, minutes=MINUTES):
-    alloc = Allocator(amap)
+    alloc = Allocator(amap, cycle_s, C)
     out = {}
     for kind in CONTROLLERS:
         Vs, ps = run(alloc, amap, kind, C, cycle_s, minutes)

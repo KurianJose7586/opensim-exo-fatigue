@@ -19,7 +19,7 @@ Runbook for the supervisor: [`docs/RUN_ON_DGX.md`](docs/RUN_ON_DGX.md) — one i
 |---|---|---|
 | A — OpenSim twin | `src/musculoskeletal/twin.py` | **Gate A passed.** 2D model + 3-joint exo + device mass, MocoInverse converges, 26–42 s per evaluation on a laptop |
 | B — fatigue | `src/fatigue/` | Validated earlier (bit-exact vs authors' code; 0.6% held-out) |
-| C — allocation | `src/allocation/` | 5 controllers, equal budget. Toy plant passes; real twin grid = `run_pipeline.sh phase_c` |
+| C — allocation | `src/allocation/` | **Run on the twin:** coupled min-max allocation cuts worst-muscle fatigue 60% vs none, 9% below independent per-joint control, same budget (`notes/results.md` §7) |
 | D1 — dataset | `src/jobs/sweep.py`, `configs/` | Resumable sharded sweep; smoke tier 18/18 converged, 6 KB per solve |
 | D2 — surrogate | `src/activation/surrogate.py` | Ensemble, subject-held-out split; R² 0.999 on toy, runs on twin data |
 | D3 — RL policy | `src/activation/policy.py` | SAC in the surrogate, disagreement penalty; runs end to end |

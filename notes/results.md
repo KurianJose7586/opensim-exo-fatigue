@@ -324,3 +324,59 @@ None of these are results. They show every stage runs and hands its output to th
 
 **These smoke numbers came from the pre-fix twin.** The pipeline was re-run after the fixes;
 see section 7.
+
+### 6b. Smoke re-run after the twin fixes (2026-10-02)
+
+- **D1:** 18/18 converged. One task first failed with the suspected shared-cwd collision, then
+  passed on `--retry-failed` in 25 s.
+- **D2:** held-out-subject R² 0.73 with 2 training subjects (wiring check only)
+- **D3:** a 3k-step policy reaches −50% vs none inside the surrogate (still untrained by DGX
+  standards)
+- **D4 against the twin, one held-out subject, 30 s walk:** coupled retention 1.03, policy
+  retention 1.31. Twin worst V: none 0.301, coupled 0.176, policy 0.157. Policy latency
+  **0.9 ms vs 62 s** per twin evaluation (~70,000×). Too short and too small to mean anything
+  scientifically, but every stage now runs on the corrected twin and the numbers hang together.
+
+## 7. Phase C on the real twin (`src/allocation/run_phase_c.py`, 2026-10-02)
+
+125 MocoInverse solves (device capacity 0–0.4 at each joint in steps of 0.1), 125/125 converged,
+joint reserve RMS median 5.0 Nm. Nominal subject, normal walking, 10-minute walk, shared budget
+sum(p) <= 0.6. Figure: `figures/phase_c_fatigue.png`.
+
+```
+controller      peak V  vs none  worst muscle   mean p (hip knee ankle)
+none             0.461      +0%     iliopsoas   [0.   0.   0.  ]
+knee_only        0.414     -10%     iliopsoas   [0.   0.15 0.  ]
+independent      0.204     -56%        soleus   [0.23 0.1  0.27]
+blind            0.211     -54%        soleus   [0.3  0.1  0.2 ]
+coupled          0.186     -60%     iliopsoas   [0.2  0.05 0.35]
+```
+
+**Coupled min-max allocation lowers worst-muscle fatigue 9% below the best baseline
+(independent per-joint control)**, with the same budget. It works by equalising the three
+limiting muscles across joints (iliopsoas 0.186, soleus 0.184, gastrocnemius 0.183). A per-joint
+controller cannot see that trade.
+
+**The biarticular mechanism is visible directly in the twin** (mean activation, capacity 0.4 at
+one joint):
+- hip assistance → hamstrings 0.086 → 0.060 (−30%), rectus femoris 0.079 → 0.056
+- knee assistance → gastrocnemius 0.103 → 0.076 (−26%)
+- knee assistance *raises* soleus 0.103 → 0.114 and rectus femoris 0.079 → 0.088. That is
+  coupling working against you, which a per-joint controller cannot anticipate
+
+**How it got here, honestly.** The first coupled controller minimised a fatigue-weighted sum of
+squared activations. It tied with blind (0.211) and lost to independent (0.204). Switching it to
+the objective actually being reported (minimise the worst muscle's predicted fatigue over a
+60-cycle horizon, through the exact cycle map) gave 0.186. The exact steady-state min-max over
+the whole candidate grid is also 0.186, so the controller reaches the grid optimum. Do not
+present the first version as a baseline we beat. It was our own mis-specified controller.
+
+**Caveats before this goes anywhere:**
+- one subject, one condition, the reduced 2D model, an *ideal* device
+- R = 0.5 sets the equilibrium, so every number here scales with it. Source still unknown
+- the soleus flag (observations.md) limits the ankle side, and soleus is one of the three
+  limiting muscles
+- knee_only uses only 0.15 of its allowed 0.4: the effort penalty makes it stop early. Every
+  controller pays the same penalty, but knee_only is weaker partly because of it
+- a 9% margin over independent is real but modest. Whether it grows across subjects and
+  conditions is what D1–D4 on the DGX will say

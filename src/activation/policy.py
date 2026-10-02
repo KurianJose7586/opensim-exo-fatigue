@@ -119,7 +119,8 @@ def allocator_act(kind):
         key = tuple(np.round(env.cond, 6))
         if key not in cache:
             cache.clear()
-            cache[key] = al.Allocator(env.model.amap(env.subj, env.cond))
+            cache[key] = al.Allocator(env.model.amap(env.subj, env.cond),
+                                      float(cycle_s(env.cond[0])), env.C)
         return cache[key](kind, env.V)
     return act
 
