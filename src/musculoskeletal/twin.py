@@ -27,6 +27,15 @@ Subject variation (D1 samples these):
                     gait changes shape with speed, not just tempo. Replace with
                     measured kinematics per speed (Camargo) when available.
 
+Domain randomisation (Luo et al. 2024, Nature): parameters a real device cannot
+measure on its user. D1 samples them, the surrogate and policy never see them,
+so D4 measures whether the policy is robust to them. All default to 1 (nominal).
+    fiber_length_scale  every muscle's optimal fiber length. Tendon slack length
+                        moves the other way, so the nominal operating point stays
+                        on the plateau; what changes is the force-length width.
+    exo_capacity_scale  torque the device actually delivers / its nominal cap p_j
+    device_mass_scale   device mass / DEVICE_MASS
+
 Runs under the OpenSim env (Python 3.11 + `conda install -c opensim-org opensim`).
 """
 
@@ -60,6 +69,10 @@ osim.Logger.setLevelString("error")
 class Subject:
     mass_scale: float = 1.0
     strength_scale: float = 1.0
+    # hidden: randomised in D1, never observed by the surrogate or policy
+    fiber_length_scale: float = 1.0
+    exo_capacity_scale: float = 1.0
+    device_mass_scale: float = 1.0
 
 
 @dataclass
@@ -92,6 +105,7 @@ def _body_model(subject, condition, device):
     added = {"torso": condition.load_kg}
     if device:
         for seg, dm in DEVICE_MASS.items():
+            dm *= subject.device_mass_scale
             if seg == "pelvis":
                 added["pelvis"] = added.get("pelvis", 0.0) + 2 * dm
             else:
@@ -106,6 +120,12 @@ def _body_model(subject, condition, device):
         c.set_stiffness(c.get_stiffness() * m1 / m0)
     for m in components(model, osim.Muscle):
         m.setMaxIsometricForce(m.getMaxIsometricForce() * subject.strength_scale)
+        # fiber length along the tendon at optimum is l_opt * cos(pennation_at_optimal);
+        # give the tendon what the fiber loses, so the nominal MTU length is unchanged
+        lopt = m.getOptimalFiberLength()
+        dl = lopt * (1.0 - subject.fiber_length_scale)
+        m.setOptimalFiberLength(lopt - dl)
+        m.setTendonSlackLength(m.getTendonSlackLength() + dl * np.cos(m.getPennationAngleAtOptimalFiberLength()))
     return model
 
 
@@ -204,9 +224,10 @@ EXO_F = 100.0      # device optimal force: controls stay O(0.1-1), well scaled f
 EXO_WEIGHT = 1e-3  # device's weight in the effort goal: ~free (muscles and reserves weigh 1)
 
 
-def _add_exo(model, peaks, p):
+def _add_exo(model, peaks, p, capacity=1.0):
     """Ideal assistive device per joint (Dembia et al. 2017, PLoS ONE): a torque
-    actuator the optimiser uses freely, capped at |tau| <= p_j * peak|tau_net_j|.
+    actuator the optimiser uses freely, capped at |tau| <= capacity * p_j * peak|tau_net_j|.
+    capacity < 1 is a device that under-delivers its nominal cap (Subject.exo_capacity_scale).
 
     p_j is the device's torque capacity at joint j as a fraction of that joint's
     peak net moment. Its effort cost is ~0 (EXO_WEIGHT), so within the cap it takes
@@ -225,7 +246,7 @@ def _add_exo(model, peaks, p):
             act = osim.CoordinateActuator(f"{coord}_{side}")
             act.setName(f"exo_{joint}_{side}")
             act.setOptimalForce(EXO_F)
-            lim = pj * peaks[f"{coord}_{side}"] / EXO_F
+            lim = capacity * pj * peaks[f"{coord}_{side}"] / EXO_F
             act.setMinControl(-lim)
             act.setMaxControl(lim)
             model.addForce(act)
@@ -241,7 +262,7 @@ def activations(subject=Subject(), condition=Condition(), p=(0.0, 0.0, 0.0)):
         _, moments = net_moments(subject, condition, kin, t0, t1)
         peaks = {k: float(np.abs(v).max()) for k, v in moments.items()}
         model = _body_model(subject, condition, device=True)
-        _add_exo(model, peaks, p)
+        _add_exo(model, peaks, p, subject.exo_capacity_scale)
         study, sol = _inverse(model, kin, t0, t1)
     solve_s = time.perf_counter() - tic
     success = bool(sol.success())
@@ -291,10 +312,27 @@ def _check_scaling():
     assert abs(mass(mod) - (1.2 * m0 + 10)) < 1e-9, "mass scale / load not applied"
     assert abs(k - mass(mod) / m0) < 1e-9, f"contact stiffness scaled by {k}"
 
+    # hidden parameters: fiber length scaled, nominal MTU length kept, device mass scaled
+    fib = _body_model(Subject(fiber_length_scale=0.9, device_mass_scale=1.5), Condition(), device=True)
+    nom = _body_model(Subject(), Condition(), device=True)
+    pairs = list(zip(components(nom, osim.Muscle), components(fib, osim.Muscle)))
+    assert pairs, "no muscles found -- fiber length scaling would silently do nothing"
+    for a, b in pairs:
+        cos = np.cos(a.getPennationAngleAtOptimalFiberLength())
+        assert abs(b.getOptimalFiberLength() / a.getOptimalFiberLength() - 0.9) < 1e-9
+        assert abs((b.getTendonSlackLength() + b.getOptimalFiberLength() * cos)
+                   - (a.getTendonSlackLength() + a.getOptimalFiberLength() * cos)) < 1e-12
+    dev = mass(nom) - m0                                   # device mass at scale 1
+    assert abs(mass(fib) - m0 - 1.5 * dev) < 1e-9, "device mass scale not applied"
+    peaks = {f"{c}_{s}": 50.0 for c in JOINTS.values() for s in "lr"}
+    _add_exo(nom, peaks, (0.2, 0.2, 0.2), capacity=0.8)
+    lims = [a.getMaxControl() for a in components(nom, osim.CoordinateActuator) if "exo_" in a.getName()]
+    assert len(lims) == 6 and np.allclose(lims, 0.8 * 0.2 * 50.0 / EXO_F), f"exo capacity not applied: {lims}"
+
 
 if __name__ == "__main__":
     _check_scaling()
-    print("scaling OK: strength, mass, load and contact stiffness all applied")
+    print("scaling OK: strength, mass, load, contact stiffness, fiber length, device mass all applied")
     base = activations()
     print(f"unassisted: solve {base['solve_s']:.1f} s, success={base['success']}, "
           f"pelvis residual rms {base['residual_rms']:.1f}, joint reserve rms {base['reserve_rms']:.2f} Nm")
