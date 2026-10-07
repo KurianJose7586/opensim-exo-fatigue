@@ -11,3 +11,7 @@ ranges:                       # ponytail: plausible adult ranges, not fitted to 
   speed_scale: [0.8, 1.25]    # x walking tempo (time-scaled reference kinematics)
   load_kg: [0.0, 20.0]        # backpack on the torso
   p: [0.0, 0.4]               # assistance fraction per joint (hip, knee, ankle)
+  # hidden: domain randomisation (Luo et al. 2024), never observed by surrogate/policy
+  fiber_length_scale: [0.9, 1.1]   # x optimal fiber length, tendon slack compensates
+  exo_capacity_scale: [0.7, 1.0]   # delivered / nominal device torque cap
+  device_mass_scale: [0.5, 1.5]    # x DEVICE_MASS in twin.py

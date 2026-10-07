@@ -33,8 +33,11 @@ import yaml
 from scipy.stats import qmc
 
 ROOT = Path(__file__).resolve().parents[2]
-SUBJECT_KEYS = ["mass_scale", "strength_scale"]
+SUBJECT_KEYS = ["mass_scale", "strength_scale"]     # observed: surrogate and policy inputs
 CONDITION_KEYS = ["speed_scale", "load_kg"]
+# Domain randomisation (twin.Subject): sampled per subject when the config gives a
+# range, nominal 1.0 otherwise. Saved as x_hidden, never fed to the surrogate.
+HIDDEN_KEYS = ["fiber_length_scale", "exo_capacity_scale", "device_mass_scale"]
 
 
 def tasks(cfg):
@@ -55,14 +58,15 @@ def tasks(cfg):
         return lo + u * (hi - lo)
 
     out, seed = [], cfg["seed"]
-    S = lhs(cfg["subjects"], SUBJECT_KEYS, seed)
+    s_keys = SUBJECT_KEYS + [k for k in HIDDEN_KEYS if k in r]
+    S = lhs(cfg["subjects"], s_keys, seed)
     for s_id, s in enumerate(S):
         C = lhs(cfg["conditions_per_subject"], CONDITION_KEYS, seed + 1000 + s_id)
         for c_id, c in enumerate(C):
             P = lhs(cfg["assist_per_condition"], ["p"] * 3, seed + 10**6 + 1000 * s_id + c_id)
             P[0] = 0.0                      # every condition keeps its unassisted baseline
             for p in P:
-                out.append((s_id, dict(zip(SUBJECT_KEYS, map(float, s))),
+                out.append((s_id, dict(zip(s_keys, map(float, s))),
                             dict(zip(CONDITION_KEYS, map(float, c))), p))
     return out
 
@@ -92,6 +96,7 @@ def _run_one(args):
         r = twin.activations(twin.Subject(**subj), twin.Condition(**cond), p)
         tmp = out_dir / f"task_{i:06d}.tmp.npz"
         np.savez_compressed(tmp, subject_id=s_id, x_subject=[subj[k] for k in SUBJECT_KEYS],
+                            x_hidden=[subj.get(k, 1.0) for k in HIDDEN_KEYS],
                             x_condition=[cond[k] for k in CONDITION_KEYS],
                             acts=r["acts"].astype(np.float32), p=r["p"], cycle_s=r["cycle_s"],
                             residual_rms=r["residual_rms"], reserve_rms=r["reserve_rms"],
@@ -107,6 +112,11 @@ def _run_one(args):
 def run(cfg, cfg_text, index, count, workers, retry_failed=False):
     out_dir = _out_dir(cfg)
     out_dir.mkdir(parents=True, exist_ok=True)
+    # resuming skips finished tasks, so outputs from an edited config would silently mix in
+    old = next(out_dir.glob("task_*.npz"), None)
+    if old is not None and str(np.load(old)["config"]) != cfg_text:
+        sys.exit(f"{out_dir} holds results from a different version of {cfg['name']}'s config. "
+                 f"Move that folder aside, then rerun.")
     if retry_failed:
         for f in out_dir.glob("failed_*.txt"):
             if int(f.stem.split("_")[1]) % count == index:
@@ -138,7 +148,9 @@ def collect(cfg):
     if not files:
         sys.exit(f"no results in {out_dir}")
     rows = [dict(np.load(f)) for f in files]
-    keys = ["subject_id", "x_subject", "x_condition", "acts", "p", "cycle_s",
+    for r in rows:                                  # tasks saved before x_hidden existed
+        r.setdefault("x_hidden", np.ones(len(HIDDEN_KEYS)))
+    keys = ["subject_id", "x_subject", "x_hidden", "x_condition", "acts", "p", "cycle_s",
             "residual_rms", "reserve_rms", "solve_s", "success"]
     merged = {k: np.stack([r[k] for r in rows]) for k in keys}
     merged["task"] = np.array([int(f.stem.split("_")[1]) for f in files])

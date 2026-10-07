@@ -46,7 +46,7 @@ def _setup(sur_path, pol_path):
 
 def _episode(args):
     """One walk, one controller, one held-out subject -- twin plant and surrogate plant."""
-    sur_path, pol_path, subject, ctrl, seed, minutes = args
+    sur_path, pol_path, subject, hidden, ctrl, seed, minutes = args
     import twin
     from policy import WalkEnv, allocator_act, policy_act, episode
     model, _, _, ranges, sac = _setup(sur_path, pol_path)
@@ -59,7 +59,8 @@ def _episode(args):
             p = np.round(np.asarray(p) / P_ROUND) * P_ROUND
             key = (tuple(np.round(self.cond, 6)), tuple(p))
             if key not in self.cache:
-                r = twin.activations(twin.Subject(*map(float, self.subj)),
+                # the twin gets the subject's hidden (randomised) parameters; the policy never saw them
+                r = twin.activations(twin.Subject(*map(float, self.subj), *map(float, hidden)),
                                      twin.Condition(*map(float, self.cond)), p)
                 self.cache[key] = r
             r = self.cache[key]
@@ -72,7 +73,7 @@ def _episode(args):
     tenv = TwinEnv(model, [subject], ranges, **kw)
     tw = episode(tenv, act, subject, seed)
     err, sd, solve, ok = map(np.array, zip(*tenv.log))
-    return {"subject": subject.tolist(), "controller": ctrl, "seed": seed,
+    return {"subject": subject.tolist(), "hidden": [float(x) for x in hidden], "controller": ctrl, "seed": seed,
             "twin_mean_peak_V": tw["mean_peak_V"], "sur_mean_peak_V": sur["mean_peak_V"],
             "act_rmse": float(err.mean()), "frac_high_sd": float((sd > HIGH_SD).mean()),
             "twin_solves": len(tenv.cache), "solve_s": float(np.median(solve)),
@@ -100,9 +101,11 @@ if __name__ == "__main__":
 
     model, meta, data, ranges, sac = _setup(a.surrogate, a.policy)
     sid, xs = data["subject_id"], data["x_subject"]
+    xh = data["x_hidden"] if "x_hidden" in data else np.ones((len(sid), 3))   # sweeps before randomisation
     test = [xs[sid == i][0] for i in meta["test_subjects"]][: a.subjects]
-    jobs = [(a.surrogate, a.policy, s, c, seed, a.minutes)
-            for s in test for c in CONTROLLERS for seed in range(a.seeds)]
+    hid = [xh[sid == i][0] for i in meta["test_subjects"]][: a.subjects]
+    jobs = [(a.surrogate, a.policy, s, h, c, seed, a.minutes)
+            for s, h in zip(test, hid) for c in CONTROLLERS for seed in range(a.seeds)]
     print(f"D4: {len(test)} held-out subjects x {len(CONTROLLERS)} controllers x {a.seeds} seeds "
           f"= {len(jobs)} closed-loop walks against the twin, {a.workers} workers", flush=True)
 
