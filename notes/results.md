@@ -271,7 +271,8 @@ no text search, so scoop risk is unassessed.
 
 ## 5. Gate A: the OpenSim twin (`src/musculoskeletal/twin.py`, 2026-10-02)
 
-Reduced 2D model (gait10dof18musc), exo at hip/knee/ankle on both legs, 6.6 kg of device mass.
+Reduced 2D model (gait10dof18musc), exo at hip/knee/ankle on both legs, 8.6 kg of device mass
+(`DEVICE_MASS`: pelvis 2 x 2.0, femur/tibia 1.0 and calcn 0.3 per side).
 One evaluation = two MocoInverse solves: an ID-equivalent solve for net joint moments, then the
 muscle solve with the assistance applied.
 

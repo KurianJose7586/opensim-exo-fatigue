@@ -9,7 +9,18 @@ with the real twin (MocoInverse) as the plant, for held-out subjects:
     surrogate error     rmse between surrogate and twin activations at the
                         actions the policy actually took (on-policy, not a test set)
     disagreement        how often the policy ran where the ensemble disagreed
+    rank agreement      do twin and surrogate order the controllers the same way?
+                        Retention vs "none" cannot see a flip between two assisted
+                        controllers; in the pre-review smoke run the surrogate put
+                        coupled ahead of the policy and the twin the reverse.
     latency             policy decision vs one twin evaluation -- the headline ratio
+
+Controllers and policy observe V_est (the fatigue model over the SURROGATE's
+activations), never the twin's true V: the twin carries the subject's hidden
+parameters, and a real device cannot measure fatigue. Scores use the true V.
+Both the mean over the walk (the policy's training reward) and the end-of-walk
+value (Phase C's metric) are reported, since the policy optimises the first and
+`coupled` a 60-cycle look-ahead closer to the second.
 
 Needs OpenSim AND torch/stable-baselines3 in one env (docs/RUN_ON_DGX.md).
 
@@ -64,9 +75,9 @@ def _episode(args):
                                      twin.Condition(*map(float, self.cond)), p)
                 self.cache[key] = r
             r = self.cache[key]
-            mu, sd = WalkEnv.plant(self, p)
+            mu, sd = self.predict(p)
             self.log.append((float(np.sqrt(((mu - r["acts"]) ** 2).mean())), sd, r["solve_s"], r["success"]))
-            return r["acts"], sd
+            return r["acts"], mu, sd       # truth from the twin, estimate from the surrogate
 
     kw = dict(minutes=minutes, random_start=False)
     sur = episode(WalkEnv(model, [subject], ranges, **kw), act, subject, seed)
@@ -75,6 +86,7 @@ def _episode(args):
     err, sd, solve, ok = map(np.array, zip(*tenv.log))
     return {"subject": subject.tolist(), "hidden": [float(x) for x in hidden], "controller": ctrl, "seed": seed,
             "twin_mean_peak_V": tw["mean_peak_V"], "sur_mean_peak_V": sur["mean_peak_V"],
+            "twin_final_peak_V": tw["final_peak_V"], "sur_final_peak_V": sur["final_peak_V"],
             "act_rmse": float(err.mean()), "frac_high_sd": float((sd > HIGH_SD).mean()),
             "twin_solves": len(tenv.cache), "solve_s": float(np.median(solve)),
             "all_converged": bool(ok.all())}
@@ -100,6 +112,10 @@ if __name__ == "__main__":
     a = ap.parse_args()
 
     model, meta, data, ranges, sac = _setup(a.surrogate, a.policy)
+    trained = Path(a.policy).with_suffix(".json")
+    if trained.exists() and json.loads(trained.read_text())["minutes"] != a.minutes:
+        print(f"WARNING: policy trained on {json.loads(trained.read_text())['minutes']}-minute walks, "
+              f"replayed on {a.minutes}: its elapsed-time input is out of distribution", flush=True)
     sid, xs = data["subject_id"], data["x_subject"]
     xh = data["x_hidden"] if "x_hidden" in data else np.ones((len(sid), 3))   # sweeps before randomisation
     test = [xs[sid == i][0] for i in meta["test_subjects"]][: a.subjects]
@@ -113,6 +129,9 @@ if __name__ == "__main__":
         import multiprocessing as mp
         import os
         os.environ["OPENSIM_MOCO_PARALLEL"] = "1"
+        # and one BLAS thread: with only the line above, a laptop worker still ran 17 threads
+        # on ~2.3 cores (2026-10-07). Children inherit this env at spawn.
+        os.environ["OPENBLAS_NUM_THREADS"] = os.environ["OMP_NUM_THREADS"] = "1"
         with mp.get_context("spawn").Pool(a.workers) as pool:
             rows = pool.map(_episode, jobs)
     else:
@@ -121,18 +140,31 @@ if __name__ == "__main__":
     by = {c: [r for r in rows if r["controller"] == c] for c in CONTROLLERS}
     none_t = np.mean([r["twin_mean_peak_V"] for r in by["none"]])
     none_s = np.mean([r["sur_mean_peak_V"] for r in by["none"]])
-    print(f"\n{'controller':<12}{'worst V twin':>13}{'worst V sur':>12}{'retention':>11}"
-          f"{'act rmse':>10}{'high-sd':>9}{'solves':>8}")
+    print(f"\n{'controller':<12}{'worst V twin':>13}{'worst V sur':>12}{'final twin':>11}{'final sur':>10}"
+          f"{'retention':>11}{'act rmse':>10}{'high-sd':>9}{'solves':>8}")
     summary = {}
     for c, rs in by.items():
         t = np.mean([r["twin_mean_peak_V"] for r in rs])
         s = np.mean([r["sur_mean_peak_V"] for r in rs])
         ret = (none_t - t) / (none_s - s) if c != "none" and abs(none_s - s) > 1e-9 else np.nan
         summary[c] = {"twin": t, "surrogate": s, "retention": ret,
+                      "twin_final": np.mean([r["twin_final_peak_V"] for r in rs]),
+                      "surrogate_final": np.mean([r["sur_final_peak_V"] for r in rs]),
                       "act_rmse": np.mean([r["act_rmse"] for r in rs]),
                       "frac_high_sd": np.mean([r["frac_high_sd"] for r in rs])}
-        print(f"{c:<12}{t:>13.3f}{s:>12.3f}{ret:>11.2f}{summary[c]['act_rmse']:>10.4f}"
+        print(f"{c:<12}{t:>13.3f}{s:>12.3f}{summary[c]['twin_final']:>11.3f}{summary[c]['surrogate_final']:>10.3f}"
+              f"{ret:>11.2f}{summary[c]['act_rmse']:>10.4f}"
               f"{summary[c]['frac_high_sd']:>9.0%}{sum(r['twin_solves'] for r in rs):>8d}")
+
+    # the ordering is the claim, so check the twin and the surrogate agree on it
+    order = {k: sorted(CONTROLLERS, key=lambda c: summary[c][k]) for k in ("twin", "surrogate")}
+    gap = {k: summary["rl_policy"][k] - summary["coupled"][k] for k in ("twin", "surrogate")}
+    summary["ranking"] = {**order, "agree": order["twin"] == order["surrogate"], "policy_minus_coupled": gap}
+    print(f"\nranking, best first -- twin: {order['twin']}   surrogate: {order['surrogate']}")
+    print(f"policy - coupled worst V: twin {gap['twin']:+.3f}, surrogate {gap['surrogate']:+.3f}")
+    if not summary["ranking"]["agree"]:
+        print("WARNING: twin and surrogate rank the controllers differently -- the policy's standing "
+              "against coupled is not something the surrogate predicted")
 
     lat = latency(sac, model, test[0], None)
     solve = np.median([r["solve_s"] for r in rows])

@@ -21,6 +21,7 @@ Runs in the OpenSim env (Python 3.11 + opensim).
 """
 
 import argparse
+import hashlib
 import os
 import subprocess
 import tempfile
@@ -76,10 +77,21 @@ def _out_dir(cfg):
 
 
 def _commit():
+    """HEAD, suffixed -dirty when tracked files have uncommitted edits."""
     try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+        return subprocess.check_output(["git", "describe", "--always", "--dirty", "--abbrev=40"],
+                                       cwd=ROOT, text=True).strip()
     except Exception:
         return "unknown"
+
+
+def _twin_sha():
+    """Fingerprint of everything a twin evaluation depends on: its code and model files.
+    A resumed sweep must not mix outputs from two versions of the twin."""
+    h = hashlib.sha256()
+    for f in [ROOT / "src" / "musculoskeletal" / "twin.py", *sorted((ROOT / "models" / "base").glob("*.*"))]:
+        h.update(f.read_bytes().replace(b"\r\n", b"\n"))   # same sha on a Windows and a Linux checkout
+    return h.hexdigest()[:16]
 
 
 def _run_one(args):
@@ -100,8 +112,10 @@ def _run_one(args):
                             x_condition=[cond[k] for k in CONDITION_KEYS],
                             acts=r["acts"].astype(np.float32), p=r["p"], cycle_s=r["cycle_s"],
                             residual_rms=r["residual_rms"], reserve_rms=r["reserve_rms"],
+                            reserve_rms_joint=r["reserve_rms_joint"], reserve_max_joint=r["reserve_max_joint"],
+                            peak_moment=r["peak_moment"],
                             solve_s=r["solve_s"], success=r["success"],
-                            commit=commit, config=cfg_text)
+                            commit=commit, config=cfg_text, twin_sha=_twin_sha())
         os.replace(tmp, out_dir / f"task_{i:06d}.npz")    # atomic: a killed pod leaves no half file
         return i, r["success"], r["solve_s"]
     except Exception:
@@ -113,10 +127,16 @@ def run(cfg, cfg_text, index, count, workers, retry_failed=False):
     out_dir = _out_dir(cfg)
     out_dir.mkdir(parents=True, exist_ok=True)
     # resuming skips finished tasks, so outputs from an edited config would silently mix in
+    # ...and so would outputs from an edited twin: the config alone does not say what produced them
     old = next(out_dir.glob("task_*.npz"), None)
-    if old is not None and str(np.load(old)["config"]) != cfg_text:
-        sys.exit(f"{out_dir} holds results from a different version of {cfg['name']}'s config. "
-                 f"Move that folder aside, then rerun.")
+    if old is not None:
+        o = np.load(old)
+        if str(o["config"]) != cfg_text:
+            sys.exit(f"{out_dir} holds results from a different version of {cfg['name']}'s config. "
+                     f"Move that folder aside, then rerun.")
+        if (str(o["twin_sha"]) if "twin_sha" in o else None) != _twin_sha():
+            sys.exit(f"{out_dir} holds results from a different version of twin.py or models/base. "
+                     f"Move that folder aside, then rerun.")
     if retry_failed:
         for f in out_dir.glob("failed_*.txt"):
             if int(f.stem.split("_")[1]) % count == index:
@@ -130,6 +150,9 @@ def run(cfg, cfg_text, index, count, workers, retry_failed=False):
     if workers > 1:
         # one solver thread per process, or W processes x all cores thrash
         os.environ["OPENSIM_MOCO_PARALLEL"] = "1"
+        # and one BLAS thread: with only the line above, a laptop worker still ran 17 threads
+        # on ~2.3 cores (2026-10-07). Children inherit this env at spawn.
+        os.environ["OPENBLAS_NUM_THREADS"] = os.environ["OMP_NUM_THREADS"] = "1"
         import multiprocessing as mp
         with mp.get_context("spawn").Pool(workers, maxtasksperchild=20) as pool:
             for n, (i, ok, s) in enumerate(pool.imap_unordered(_run_one, jobs), 1):
@@ -148,10 +171,14 @@ def collect(cfg):
     if not files:
         sys.exit(f"no results in {out_dir}")
     rows = [dict(np.load(f)) for f in files]
+    shas = {str(r.get("twin_sha", "none")) for r in rows}
+    if len(shas) > 1:
+        sys.exit(f"{out_dir} mixes outputs from {len(shas)} versions of the twin: {sorted(shas)}")
     for r in rows:                                  # tasks saved before x_hidden existed
         r.setdefault("x_hidden", np.ones(len(HIDDEN_KEYS)))
     keys = ["subject_id", "x_subject", "x_hidden", "x_condition", "acts", "p", "cycle_s",
             "residual_rms", "reserve_rms", "solve_s", "success"]
+    keys += [k for k in ("reserve_rms_joint", "reserve_max_joint", "peak_moment") if k in rows[0]]
     merged = {k: np.stack([r[k] for r in rows]) for k in keys}
     merged["task"] = np.array([int(f.stem.split("_")[1]) for f in files])
     merged["commit"], merged["config"] = rows[0]["commit"], rows[0]["config"]
@@ -163,6 +190,11 @@ def collect(cfg):
           f"p90 {np.percentile(merged['solve_s'], 90):.1f} s")
     print(f"  joint reserve rms: median {np.median(merged['reserve_rms']):.2f} Nm  "
           f"(large = muscles could not produce the moment)")
+    if "reserve_max_joint" in merged:
+        sys.path.insert(0, str(ROOT / "src" / "musculoskeletal"))
+        from twin import RESERVE_ORDER    # opensim env: collect runs where run does
+        print("  reserve peak per joint, median over tasks [Nm]: " + ", ".join(
+            f"{n} {v:.0f}" for n, v in zip(RESERVE_ORDER, np.median(merged["reserve_max_joint"], 0))))
     print(f"  -> results/{cfg['name']}.npz")
 
 

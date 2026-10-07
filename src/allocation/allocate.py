@@ -35,6 +35,21 @@ controllers differ only in what they know:
                 exact cycle map. Sees every muscle, including the biarticular
                 ones, and optimises the reported objective itself.
 
+ABLATIONS -- what is the win made of? `coupled` differs from each baseline in
+more than one way (objective, joint coupling, fatigue feedback). Each ablation
+changes ONE of them, so the margin can be attributed (review 2026-10-07):
+
+  independent_minmax  independent's per-joint split and information, coupled's
+                      min-max objective                  -> isolates the OBJECTIVE
+  local               coupled, but planned on an ANATOMICALLY LOCAL model: each
+                      muscle responds only to assistance at joints it crosses
+                      (knee assistance cannot move soleus) -> isolates the
+                      cross-joint redistribution a per-joint view misses
+  static              coupled's objective at steady state, V* = B/(1-A), solved
+                      once and never updated              -> isolates the fatigue
+                      FEEDBACK. On the pre-review twin it matched coupled exactly:
+                      in steady walking the fatigue state changed no decision.
+
 The first version of `coupled` minimised the weighted sum of squares above
 (the knee_only cost on all three joints). On the twin it tied with blind and
 lost to independent (0.211 vs 0.204), because a weighted sum of squares is
@@ -46,6 +61,7 @@ the grid. Swap for CasADi through the smoothed model if the action space grows.
 """
 
 import sys
+from functools import cached_property
 from pathlib import Path
 
 import numpy as np
@@ -69,6 +85,7 @@ C_ZHANG = 8.2365
 BUDGET, P_MAX, LAM = 0.6, 0.4, 0.05
 MINUTES = 10.0
 CONTROLLERS = ("none", "knee_only", "independent", "blind", "coupled")
+ABLATIONS = ("independent_minmax", "local", "static")
 HORIZON = 60   # cycles of look-ahead for `coupled`, ~1 min: about one fatigue time
                # constant (C/M ~ 8/0.1 s). ponytail: fixed; tune if it matters.
 
@@ -126,12 +143,30 @@ class Allocator:
 
     def __init__(self, amap, cycle_s, C=C_ZHANG, P=None):
         self.P = candidates() if P is None else P
+        self.amap, self.cycle_s, self.C = amap, cycle_s, C
         acts = [amap(p) for p in self.P]
         self.S = np.array([np.mean(a ** 2, axis=0) for a in acts])           # (n_cand, 9)
-        A, B = zip(*(cycle_map(a, cycle_s, C) for a in acts))
-        AH = np.array(A) ** HORIZON
-        self.AH, self.BH = AH, np.array(B) * (1 - AH) / (1 - np.array(A))     # V_H = AH*V + BH
+        self.A, self.B = map(np.array, zip(*(cycle_map(a, cycle_s, C) for a in acts)))
+        self.AH, self.BH = self._horizon(self.A, self.B)                      # V_H = AH*V + BH
         self.reg = LAM * (self.P ** 2).sum(1)
+
+    @staticmethod
+    def _horizon(A, B):
+        AH = A ** HORIZON
+        return AH, B * (1 - AH) / (1 - A)
+
+    @cached_property
+    def local(self):
+        """(AH, BH) of the anatomically local model: muscle i sees only the joints it
+        crosses, p masked to those. Lazy: only the `local` ablation pays for it."""
+        mask = np.array([[m in CROSSES[j] for j in ("hip", "knee", "ankle")] for m in MUSCLES])
+        A, B = np.empty_like(self.A), np.empty_like(self.B)
+        for msk in np.unique(mask, axis=0):
+            cols = np.flatnonzero((mask == msk).all(1))
+            for n, p in enumerate(self.P):
+                a, b = cycle_map(self.amap(p * msk), self.cycle_s, self.C)
+                A[n, cols], B[n, cols] = a[cols], b[cols]
+        return self._horizon(A, B)
 
     def __call__(self, kind, V):
         P, S = self.P, self.S
@@ -141,19 +176,34 @@ class Allocator:
             return P[np.argmin(S.sum(1) + self.reg)]
         if kind == "coupled":
             return P[np.argmin((self.AH * V + self.BH).max(1) + self.reg)]
+        if kind == "local":
+            AH, BH = self.local
+            return P[np.argmin((AH * V + BH).max(1) + self.reg)]
+        if kind == "static":
+            return P[np.argmin((self.B / (1 - self.A)).max(1) + self.reg)]
+        if kind == "independent_minmax":
+            return self._per_joint(lambda ok, uni, joint:
+                                   (self.AH[ok][:, uni] * V[uni] + self.BH[ok][:, uni]).max(1))
         w = 1.0 / (V_M - np.minimum(V, V_M - 1e-3)) ** 2
         if kind == "knee_only":
             ok = (P[:, 0] == 0) & (P[:, 2] == 0)
             return P[ok][np.argmin(S[ok] @ w + self.reg[ok])]
         if kind == "independent":
-            p = np.zeros(3)
-            for j, joint in enumerate(("hip", "knee", "ankle")):
-                ok = np.all(np.delete(P, j, 1) == 0, axis=1)          # only this joint moves
+            def effort(ok, uni, joint):
                 W = 1.0 / (V_M - min(V[_idx(CROSSES[joint])].max(), V_M - 1e-3)) ** 2
-                cost = W * S[ok][:, _idx(UNI[joint])].sum(1) + self.reg[ok]
-                p[j] = P[ok][np.argmin(cost), j]
-            return p * min(1.0, BUDGET / max(p.sum(), 1e-12))
+                return W * S[ok][:, uni].sum(1)
+            return self._per_joint(effort)
         raise ValueError(kind)
+
+    def _per_joint(self, cost):
+        """One controller per joint: each moves only its own joint, sees only its own
+        uniarticular muscles, minimises cost(ok, uni, joint) + effort penalty; then the
+        shared budget scales them down together."""
+        p = np.zeros(3)
+        for j, joint in enumerate(("hip", "knee", "ankle")):
+            ok = np.all(np.delete(self.P, j, 1) == 0, axis=1)          # only this joint moves
+            p[j] = self.P[ok][np.argmin(cost(ok, _idx(UNI[joint]), joint) + self.reg[ok]), j]
+        return p * min(1.0, BUDGET / max(p.sum(), 1e-12))
 
 
 def run(allocator, amap, kind, C, cycle_s, minutes=MINUTES, replan=10):
@@ -178,21 +228,21 @@ def metrics(Vs, cycle_s):
             "t_th_min": float((hit[0] + 1) * cycle_s / 60) if hit.size else np.inf}
 
 
-def compare(amap, cycle_s, C=C_ZHANG, minutes=MINUTES):
+def compare(amap, cycle_s, C=C_ZHANG, minutes=MINUTES, kinds=CONTROLLERS):
     alloc = Allocator(amap, cycle_s, C)
     out = {}
-    for kind in CONTROLLERS:
+    for kind in kinds:
         Vs, ps = run(alloc, amap, kind, C, cycle_s, minutes)
-        out[kind] = {**metrics(Vs, cycle_s), "mean_p": ps.mean(0), "V": Vs}
+        out[kind] = {**metrics(Vs, cycle_s), "mean_p": ps.mean(0), "final_p": ps[-1], "V": Vs}
     return out
 
 
 def table(res):
-    print(f"{'controller':<14}{'peak V':>8}{'vs none':>9}{'worst muscle':>14}"
+    print(f"{'controller':<19}{'peak V':>8}{'vs none':>9}{'worst muscle':>14}"
           f"{'t to V_th':>11}   mean p (hip knee ankle)")
     for k, r in res.items():
         t = "never" if np.isinf(r["t_th_min"]) else f"{r['t_th_min']:.1f} min"
-        print(f"{k:<14}{r['peak_V']:>8.3f}{r['peak_V'] / res['none']['peak_V'] - 1:>+9.0%}"
+        print(f"{k:<19}{r['peak_V']:>8.3f}{r['peak_V'] / res['none']['peak_V'] - 1:>+9.0%}"
               f"{r['worst']:>14}{t:>11}   {np.array2string(r['mean_p'], precision=2)}")
 
 
@@ -215,12 +265,15 @@ def _toy_amap():
 
 if __name__ == "__main__":
     _check_cycle_map()
-    res = compare(_toy_amap(), cycle_s=1.0, minutes=5.0)
+    res = compare(_toy_amap(), cycle_s=1.0, minutes=5.0, kinds=CONTROLLERS + ABLATIONS)
     print("toy plant (hand-built coupling, NOT the twin)\n")
     table(res)
 
     e = {k: r["peak_V"] for k, r in res.items()}
-    assert all(e[k] < e["none"] for k in CONTROLLERS[1:]), "assistance must lower peak fatigue"
-    assert e["coupled"] <= min(e.values()) + 1e-9, "fatigue-aware coupled must win"
+    assert all(e[k] < e["none"] for k in CONTROLLERS[1:] + ABLATIONS), "assistance must lower peak fatigue"
+    assert e["coupled"] <= min(e[k] for k in CONTROLLERS) + 1e-9, "fatigue-aware coupled must win"
+    # toy coupling is anatomically local by construction (cross-joint effects only through
+    # muscles that span both joints), so the local model IS the plant: same choice
+    assert abs(e["local"] - e["coupled"]) < 1e-9, "local model must equal the plant on the toy"
     print("\nOK on the toy plant: every assisted controller beats none, coupled wins.")
     print("   Real numbers come from the twin: python src/allocation/run_phase_c.py")
