@@ -1,0 +1,29 @@
+# Builds the DGX image (docs/Dockerfile.opensim) on a free Linux runner and runs
+# `run_pipeline.sh check` in it: every self-check plus one real Moco solve.
+# Catches a broken Linux build here instead of on the DGX. CPU only, no GPU needed.
+name: docker-check
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image (conda OpenSim + CUDA torch wheel) is ~10 GB; the runner starts with ~14 GB free
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Build image
+        run: docker build -f docs/Dockerfile.opensim -t opensim-exo:4.6 .
+
+      - name: run_pipeline.sh check
+        run: docker run --rm -e WORKERS=2 -v "$PWD":/work opensim-exo:4.6 bash run_pipeline.sh check
