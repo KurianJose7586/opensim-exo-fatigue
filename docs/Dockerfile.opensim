@@ -1,42 +1,46 @@
-# OpenSim image for the simulation stage (CPU-only, no GPU needed).
+# One image for every stage: OpenSim Moco (Phase A/C, D1, D4) + PyTorch and
+# stable-baselines3 (D2, D3). The repo is NOT baked in -- mount it at /work, so
+# code changes never need a rebuild.
 #
-# NOT TESTED YET — a starting point for whoever builds images on the DGX, not a
-# finished recipe. The pinned Python version in particular needs checking against
-# whatever OpenSim release is current.
+# Build:  docker build -f docs/Dockerfile.opensim -t opensim-exo:4.6 .
+# Test:   docker run --rm -v "$PWD":/work opensim-exo:4.6 bash run_pipeline.sh check
+# GPU:    add --gpus all; torch picks the GPU up for D2/D3, everything else is CPU.
 #
-# Why this is separate from the PyTorch image:
-#   The simulation stage and the training stage never run in the same process.
-#   Simulation writes result files; training reads them later. Keeping them apart
-#   avoids forcing OpenSim's Python version onto the PyTorch environment.
-#
-# Build:  docker build -f Dockerfile.opensim -t <registry>/opensim:4.5 .
+# NOT YET BUILT: written and checked against a working Windows install of the same
+# packages (OpenSim 4.6, Python 3.11), but the Linux image itself has not been built.
+# The `check` stage below is the first thing to run -- it fails in minutes if anything is off.
 
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
-
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        wget bzip2 ca-certificates git libgl1 libglu1-mesa libxi6 libxrender1 \
+        wget ca-certificates git libgl1 libglu1-mesa libxi6 libxrender1 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Miniconda — OpenSim is distributed as a conda package
+# Miniforge: conda-forge by default, no Anaconda channel licence question
 ENV CONDA_DIR=/opt/conda
-RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /tmp/mc.sh \
-    && bash /tmp/mc.sh -b -p $CONDA_DIR && rm /tmp/mc.sh
+RUN wget -q https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O /tmp/mf.sh \
+    && bash /tmp/mf.sh -b -p $CONDA_DIR && rm /tmp/mf.sh
 ENV PATH=$CONDA_DIR/bin:$PATH
 
-# CHECK THIS: OpenSim's conda package supports a limited set of Python versions,
-# and the supported range moves between releases. Confirm against
-# https://anaconda.org/opensim-org/opensim before building.
-RUN conda create -y -n opensim python=3.11 \
-    && conda install -y -n opensim -c opensim-org opensim \
-    && conda install -y -n opensim -c conda-forge numpy scipy casadi pandas pyyaml \
+# OpenBLAS, not MKL: on Windows MKL's Intel runtime overwrote the one OpenSim
+# bundles and broke IPOPT (WinError 182). Pinned here too so Linux matches.
+# Python 3.11: the newest the opensim 4.6 conda build supports.
+RUN conda create -y -n opensim -c opensim-org -c conda-forge \
+        python=3.11 opensim=4.6 "libblas=*=*openblas" numpy scipy pandas pyyaml matplotlib \
     && conda clean -afy
-
 ENV PATH=$CONDA_DIR/envs/opensim/bin:$PATH
 
-# Fail the build rather than the job if the API is not importable
-RUN python -c "import opensim; print('OpenSim', opensim.GetVersion())"
+# Same env gets the learning stack. Default torch wheel = CUDA build on Linux.
+RUN python -m pip install --no-cache-dir torch gymnasium stable-baselines3 casadi
 
+# NOT casadi from conda: Moco bundles its own CasADi, and a second conda copy
+# in the same env made Moco fail ('get_forward' not defined). The pip wheel
+# keeps its DLLs inside site-packages, which is what src/mpc needs.
+
+# Fail the build, not the job, if anything is missing
+RUN python -c "import opensim, torch, stable_baselines3, casadi; print('OpenSim', opensim.GetVersion(), 'torch', torch.__version__)"
+
+ENV OPENSIM_MOCO_PARALLEL=1 PYTHONUNBUFFERED=1
 WORKDIR /work
 CMD ["/bin/bash"]

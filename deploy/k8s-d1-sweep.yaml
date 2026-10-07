@@ -1,0 +1,42 @@
+# D1 population sweep as a Kubernetes Indexed Job -- only needed if the DGX is
+# behind the cluster scheduler. On a plain DGX shell use run_pipeline.sh instead.
+#
+# CPU only, NO GPU: Moco never touches it, so this hands the GPU back to the pool.
+# K pods x 8 workers. Each pod takes tasks i with i % K == JOB_COMPLETION_INDEX.
+# Resumable: delete and re-apply after an interruption, finished tasks are skipped.
+#
+#   kubectl apply -f deploy/k8s-d1-sweep.yaml
+#   kubectl get pods -l job-name=d1-sweep
+#   # when all pods complete, merge (any pod / shell with the repo mounted):
+#   python src/jobs/sweep.py collect configs/d1_tier1.yaml
+#
+# FILL IN the three <...> values. Tier is the config file name.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: d1-sweep
+spec:
+  completionMode: Indexed
+  completions: 8          # K -- keep equal to --count below
+  parallelism: 8
+  backoffLimit: 16        # pods that die are retried; their finished tasks are kept
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: sweep
+          image: <registry>/opensim-exo:4.6
+          workingDir: /work
+          command: ["python", "-u", "src/jobs/sweep.py", "run", "configs/d1_tier1.yaml",
+                    "--count", "8", "--workers", "8"]
+          resources:
+            requests: {cpu: "8", memory: "16Gi"}
+            limits:   {cpu: "8", memory: "16Gi"}
+          volumeMounts:
+            - {name: repo, mountPath: /work}
+      volumes:
+        - name: repo
+          hostPath: {path: </home/user/opensim-exo-fatigue>, type: Directory}
+      # hostPath is node-local: pin every pod to the node that holds the repo
+      nodeSelector:
+        kubernetes.io/hostname: <node-name>

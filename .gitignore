@@ -38,3 +38,6 @@ slprj/
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# Moco writes these while a solve runs; delete one to stop that solve
+delete_this_to_stop_optimization*
