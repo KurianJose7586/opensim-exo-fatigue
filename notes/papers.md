@@ -34,11 +34,15 @@ Simple enough to compute in real time, which is why everyone downstream uses it.
 
 ### Ma, Chablat, Bennis, Zhang, Guillaume (2010)
 *A new muscle fatigue and recovery model and its ergonomics application in human simulation.*
-Virtual and Physical Prototyping 5(3):123-137. **NEEDED FOR E6 — not yet obtained.**
+Virtual and Physical Prototyping 5(3):123-137. **Obtained, open on arXiv: 1010.5891.**
 
 (The follow-up that looks properly at the recovery side: how fast a muscle bounces back once you
 stop using it. This is where published recovery-rate values live. We need it because everyone since
 has just borrowed one number, 0.5, without justifying it.)
+
+Read 2026-10-07. It gives R = 2.4 min^-1, but that number is borrowed too ("assumed to be
+constant", citing Liu et al. 2002 and Wood et al. 1997). In our model's units it lands anywhere
+from 0.33 to 2.4. Details in `observations.md`.
 
 ### Peternel, Tsagarakis, Caldwell, Ajoudani (2018)
 *Robot adaptation to human physical fatigue in human-robot co-manipulation.*

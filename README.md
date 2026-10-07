@@ -27,8 +27,9 @@ Runbook for the supervisor: [`docs/RUN_ON_DGX.md`](docs/RUN_ON_DGX.md) — one i
 | E — MATLAB | — | Supervisor's track |
 
 Not done, needs a person: Camargo data loading and per-subject scaling (supervisor), the B4
-squat re-validation through OpenSim, the arXiv novelty check, and the R = 0.5 recovery-rate source
-(now critical — see `notes/decisions.md`, "Gait objective").
+squat re-validation through OpenSim, the arXiv novelty check, and a *measured* recovery rate R.
+R = 0.5 is traced to Ma et al. 2010, which borrows it too; the Phase C ranking holds across the
+plausible range (`notes/results.md` §8).
 
 ## Layout
 
