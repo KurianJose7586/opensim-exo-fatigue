@@ -380,3 +380,43 @@ present the first version as a baseline we beat. It was our own mis-specified co
   controller pays the same penalty, but knee_only is weaker partly because of it
 - a 9% margin over independent is real but modest. Whether it grows across subjects and
   conditions is what D1–D4 on the DGX will say
+
+## 8. Two checks on the Phase C result (2026-10-07)
+
+### The coupled optimum sits between grid points — checked with a real solve
+
+Coupled's allocation, p = (0.2, 0.05, 0.35), is interpolated between grid points: knee 0.05 and
+ankle 0.35 were never solved. One MocoInverse solve at exactly that p:
+
+```
+mean activation, interpolated vs twin: rmse 0.0067, every muscle within 0.002
+steady-state worst V    interpolated 0.186 (iliopsoas)   real solve 0.189 (gastroc)
+best allocation using real grid solves only: p = (0.2, 0.1, 0.3), worst V 0.197
+```
+
+The interpolation holds. Coupled still beats the best baseline (independent, 0.204): **about 7%
+on the real solve, 9% interpolated**. Independent's 0.204 is interpolated too and has not been
+checked the same way. **Quote the margin as "7–9%".** The worst muscle flipping from iliopsoas to
+gastrocnemius is expected: coupled works by equalising three muscles, so a small change decides
+which one is highest.
+
+### Sensitivity to the recovery rate R
+
+R sets the fatigue equilibrium, so every Phase C number scales with it. Plausible range from
+Ma et al. 2010 (see `observations.md`, "Recovery rate is borrowed, not measured"): 0.33 to 2.4.
+
+```
+    R |  none  knee_only  independent  blind  coupled | coupled vs best baseline
+ 0.33 | 0.564    0.515       0.281     0.288   0.257  |  -8.6%
+  0.5 | 0.461    0.414       0.204     0.211   0.186  |  -8.7%   (current)
+  1.0 | 0.300    0.261       0.113     0.117   0.103  |  -8.6%
+  2.4 | 0.152    0.129       0.048     0.052   0.048  |  -1.3%
+```
+
+- **The ranking holds everywhere, and the ~9% margin holds for R up to 1.** The relative gain
+  barely moves while absolute fatigue changes 2x.
+- **At R = 2.4 the result mostly disappears.** Normal walking then barely fatigues anyone (worst V
+  0.05), and coupling buys 1%. If R really is near 2.4, the argument has to move to loaded or
+  fast walking, where fatigue is real. D1 already covers those conditions (load 0–20 kg, speed
+  ×0.8–1.25).
+- Reproduce: set `allocate.R` and rerun `allocate.compare` on `results/phase_c_grid.npz`.

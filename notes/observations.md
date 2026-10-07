@@ -101,6 +101,23 @@ The code comments the recovery constant as *"based on calibration or literature"
 0.5. Every paper in the chain reuses that same number. Recovery dominates anything cyclic, because
 every rest phase is recovery. **This is E6 and it is justified straight from the source.**
 
+**Traced (2026-10-07).** Ma et al. 2010 (Virtual and Physical Prototyping 5(3), arXiv 1010.5891)
+does not measure R either. It writes recovery as dF_cem/dt = R (MVC - F_cem), with R "assumed to be
+constant 2.4" min^-1, citing Liu, Brown & Yue 2002 (Biophys J 82:2344) and Wood, Fisher & Andres
+1997 (Human Factors 39:83). Its fatigue rate is k = 1 min^-1.
+
+Mapping that onto our model needs care. Ours is dV/dt = (1-V) M / C (fatiguing) and -V R / C
+(recovering), so only the ratio of recovery speed to fatigue speed matters. Ma's model in the same
+variables (V = 1 - F_cem/MVC) gives fatigue speed k and recovery speed R_Ma, so:
+
+- **R = R_Ma / k = 2.4** if you keep Ma's own pair (k = 1 min^-1)
+- **R = R_Ma * C = 0.33** if you pair Ma's absolute recovery speed (2.4/min = 0.04/s) with our
+  fitted C = 8.24 s
+
+The lineage's 0.5 sits at the low, pessimistic end of that range: low R means slow recovery and
+more fatigue. Which end is right depends on whether recovery scales with how fast a muscle tires.
+No source we have measures that for gait muscles. Phase C sensitivity: `results.md` section 8.
+
 ### Their reference implementation integrates crudely
 
 Fixed-step, simplest possible integration method, with a warning comment in the source that the loop
@@ -224,8 +241,11 @@ Development only. The DGX does the sweeps.
 - [ ] Confirm the tiring-rate constant is on the same scale between our calibration and the demo
       code values (15-20 there, 8.24 from our fit). Units need checking before values are reused.
 - [ ] Does the frozen-switch cap move if the person tires faster or slower? We fixed one tiring rate.
-- [ ] Get Ma et al. 2010 for published recovery-rate values (E6). **Now critical: R sets
-      the gait fatigue equilibrium, so every Phase C/D number scales with it.**
+- [x] Get Ma et al. 2010 for published recovery-rate values (E6). Done 2026-10-07: R = 2.4
+      min^-1, itself borrowed, which maps to 0.33–2.4 in our units. Phase C margin holds for
+      R <= 1 and drops to 1% at 2.4 (`results.md` section 8)
+- [ ] Get Liu, Brown & Yue 2002 (Biophys J) and Wood et al. 1997, Ma's sources for R, for a
+      measured value. And: does recovery speed scale with fatigue speed? That decides 0.33 vs 2.4
 - [ ] Check arXiv for the smoothing claim — PubMed covers that literature badly.
 - [ ] Check preprint servers for scoop risk. Not possible through the connector available here.
 - [ ] Email Peternel: fitted constants, the Exo-Muscle model file, and permission to include the code.

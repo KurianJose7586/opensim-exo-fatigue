@@ -123,7 +123,7 @@ Roughly ordered by value. Nothing here is blocked on anyone else.
 
 | Task | Notes |
 |---|---|
-| **Recovery rate R = 0.5 — find its source (Ma et al. 2010 / Peternel 2018)** | Now the most important open number: under cyclic gait R sets the fatigue equilibrium, so every Phase C/D result scales with it. See `notes/decisions.md` |
+| **Recovery rate R — find a measured value (Liu et al. 2002, Wood et al. 1997)** | Ma et al. 2010 is traced: its R is borrowed too, and maps to 0.33–2.4 in our units. The Phase C margin holds for R ≤ 1 and fades at 2.4. See `notes/observations.md`, `notes/results.md` §8 |
 | **Download the Camargo dataset, inspect one subject** | Needed next regardless. Marker-set mismatch is the thing that reliably eats a week; better to find out now |
 | **Check arXiv for our main novelty claim** | We searched PubMed, which covers engineering badly. The claim is *provisional* until arXiv is checked. See [`docs/gap_analysis.md`](docs/gap_analysis.md) |
 | **Check preprint servers for scoop risk** | Completely unassessed — the tool we had has no text search |
