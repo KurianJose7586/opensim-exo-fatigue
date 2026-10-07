@@ -17,9 +17,9 @@ Runbook for the supervisor: [`docs/RUN_ON_DGX.md`](docs/RUN_ON_DGX.md) — one i
 
 | Phase | Code | State |
 |---|---|---|
-| A — OpenSim twin | `src/musculoskeletal/twin.py` | **Gate A passed.** 2D model + 3-joint exo + device mass, MocoInverse converges, 26–42 s per evaluation on a laptop |
+| A — OpenSim twin | `src/musculoskeletal/twin.py` | **Gate A passed.** 2D model + 3-joint exo + device mass, MocoInverse converges, 27–41 s per evaluation on a laptop. **Known limits:** the model's source says not to use it for research (gastroc path), and it has no real push-off; ankle and gastroc results are blocked until a measured-data twin (`notes/observations.md`) |
 | B — fatigue | `src/fatigue/` | Validated earlier (bit-exact vs authors' code; 0.6% held-out) |
-| C — allocation | `src/allocation/` | **Run on the twin:** coupled min-max allocation cuts worst-muscle fatigue 60% vs none, 9% below independent per-joint control, same budget (`notes/results.md` §7) |
+| C — allocation | `src/allocation/` | **Re-run 2026-10-07 after a device-cap fix:** coupled min-max allocation cuts worst-muscle fatigue 64% vs none, 8.6% below the best baseline, same budget; a fixed allocation, not fatigue feedback; 0–10% across the unmeasured fatigue constants (`notes/results.md` §9) |
 | D1 — dataset | `src/jobs/sweep.py`, `configs/` | Resumable sharded sweep; smoke tier 18/18 converged, 6 KB per solve |
 | D2 — surrogate | `src/activation/surrogate.py` | Ensemble, subject-held-out split; R² 0.999 on toy, runs on twin data |
 | D3 — RL policy | `src/activation/policy.py` | SAC in the surrogate, disagreement penalty; runs end to end |
@@ -28,8 +28,9 @@ Runbook for the supervisor: [`docs/RUN_ON_DGX.md`](docs/RUN_ON_DGX.md) — one i
 
 Not done, needs a person: Camargo data loading and per-subject scaling (supervisor), the B4
 squat re-validation through OpenSim, the arXiv novelty check, and a *measured* recovery rate R.
-R = 0.5 is traced to Ma et al. 2010, which borrows it too; the Phase C ranking holds across the
-plausible range (`notes/results.md` §8).
+R = 0.5 is traced to Ma et al. 2010, which borrows it too. The recovery threshold M_th matters
+more than R: the Phase C margin goes from 0% to ~10% across the plausible range of both
+(`notes/results.md` §9).
 
 ## Layout
 

@@ -214,10 +214,89 @@ the parameters"), and they are now in the self-checks.
 - **Joint reserves are 7 Nm RMS unassisted** and do not shrink at tighter tolerance, even though
   no muscle exceeds 57% activation. Likely rigid-tendon fibers off their force-length plateau at
   some phases. A real limitation of this reduced model; report it. Tendon compliance would be
-  the thing to try.
+  the thing to try. **Update 2026-10-07 (review):** the pooled 7 Nm hides where it is. Per
+  joint, unassisted: right hip 17.3 Nm RMS, **125 Nm peak** (of a 135 Nm peak hip moment), right
+  knee 8.1 RMS / 65 peak, everything else under 1 Nm. The peak is the heel-strike impact (vertical
+  force 1.67x body weight from the stiff contact spheres). So the hip and knee peaks that define p
+  are mostly reserve torque, and hip assistance mostly replaces reserve (17.3 -> 7.8 Nm RMS at
+  p_hip = 0.4). Now reported per joint (`reserve_rms_joint`, `reserve_max_joint`).
 - **Soleus barely responds to ankle assistance** (−7% at 30% capacity; 0.062 even at p = 1 where
   other muscles reach 0.01–0.02). Gastroc and tib_ant respond normally. Unexplained. Look before
-  any ankle claim goes into the paper.
+  any ankle claim goes into the paper. **Mostly explained 2026-10-07 (review):** the −7% was the
+  ALL-joints test (0.3, 0.3, 0.3). Ankle-only 0.3 gave −19% (−24% in the first half of the cycle,
+  −5% in the second). The rest: knee assistance shifts plantarflexion from gastroc to soleus (the
+  biarticular redistribution itself), and the left-side cap bug below left the second half with
+  a 4.7 Nm ankle device instead of 16.9 Nm.
+
+### Review 2026-10-07: device cap was per side, so the second half of the cycle was under-assisted
+
+`_add_exo` capped each leg at p x that leg's OWN peak net moment over the half-cycle window. The
+window is right heel strike to left heel strike, so the right leg's window holds its stance and
+the left leg's holds mostly swing. Peaks: hip 135 / 30 Nm, knee 89 / 9 Nm, ankle 42 / 12 Nm
+(right / left). The left leg's activations are the stitched cycle's samples 50-99, so for the
+whole second half of every gait cycle the device was 3.6-9.4x weaker than p said. The limiting
+muscle, iliopsoas, does most of its work there (mean activation 0.191 vs 0.102 in the first half).
+Every Phase C number before this date carries it.
+
+Fix: one cap per joint, the larger of the two sides (the full-cycle peak under the symmetry the
+model already assumes). The self-check used equal fake peaks (50 Nm everywhere), so it could not
+see this; it now uses unequal ones. Old results kept in `results/pre_review/`.
+
+Same pass: the stitched cycle sampled the junction twice (`linspace` with both endpoints, so
+right(t1) and left(t0), the same gait phase, were both kept). Now `endpoint=False`.
+
+### Review 2026-10-07: the 2D model's own source says not to use it for research
+
+OpenSim's `example2DWalking.py`, which ships `2D_gait.osim`: "Do not use this model for research.
+The path of the gastroc muscle contains an error--the path does not cross the knee joint." It does
+have a knee moment arm, but a wrong one: 2.5 cm at full extension, 1.8 at 29 deg, 0.9 at 57 deg
+flexion (it should hold ~2 cm or grow). Gastroc is one of the three biarticular muscles the
+contribution claim is about. Same file: the reference kinematics are from a predictive
+simulation (Falisse et al. 2019), not measured.
+
+Second problem, contact: the ground reaction comes from two spheres per foot driven by the
+prescribed kinematics. Totals are right (mean vertical force 694 N vs 693 N body weight) and the
+kinematics are symmetric to ~1.3 deg, but the load moves between heel and toe on ~1 deg
+differences. Right ankle at the end of its window: −42 Nm and still rising; left ankle at the
+same gait phase (start of its window): +5 Nm. The full-cycle ankle peak is 42 Nm, ~0.6 Nm/kg,
+where normal push-off is ~1.5 Nm/kg. So the twin has no real push-off, and Phase C's ankle-heavy
+allocations are made on an ankle that is not loaded like a real one.
+
+Decision (with Jasith, 2026-10-07): keep the 2D model for now, fix everything else, and treat
+both as blocking for any ankle or gastroc claim. Next step, no download needed: the conda
+package ships Moco's `exampleEMGTracking` (3D 92 kg subject, measured kinematics, force-plate
+GRF via ExternalLoads, EMG for 8 muscles, one full gait cycle 0.83-2.0 s). That removes the
+contact spheres, the stitching, and gives EMG to check activations against. Its coupled knee
+crashed one quick moment-arm probe (constraint assembly), so budget time for it.
+
+### Review 2026-10-07: "coupled" is a fixed allocation
+
+On the pre-review grid the steady-state min-max over every candidate, solved once with no
+feedback, gave exactly coupled's answer (same p, same worst V) at R = 0.33, 0.5 and 1.0, and a
+slightly better one at R = 2.4. In steady walking the fatigue state never changed a decision.
+results.md already noted the equality ("the controller reaches the grid optimum") but not what
+it means: the margin comes from the OBJECTIVE, not from fatigue feedback. Blind vs coupled is the
+cleanest pair in the table (same information, different objective), and no baseline isolated the
+per-muscle or biarticular information. Three ablations added to allocate.py (see results.md 9).
+
+### Review 2026-10-07: the threshold moves the result more than R does
+
+M_th was never varied. On the pre-review grid: margin −1.5% at M_th = 0.011, −1.9% at 0.02,
+−4.8% at 0.03, −8.8% at 0.05. At the paper's literal "0.02% of MVC" (0.0002), Moco's activation
+floor of 0.01 means no muscle ever recovers: every controller reaches V = 1, min-max is undefined,
+and time to V = 0.8 is 1.5-2.6 minutes of normal walking. Muscles spend 33-77% of the cycle
+below 0.05, so where the threshold sits decides how much recovery there is. run_phase_c.py now
+prints the margin over M_th x R.
+
+### Review 2026-10-07: D4 gave the policy information no device has
+
+TwinEnv integrated V from the twin's own activations and the policy observed it. The twin
+carries the subject's hidden (randomised) parameters, so their effect leaked into the
+observation through V. Real devices cannot measure V at all. Now the policy and the Phase C
+controllers observe V_est, the fatigue model integrated over the surrogate's predictions; the
+true V only scores. Also in the pre-review smoke D4, the surrogate ranked coupled ahead of the
+policy (0.142 vs 0.154) and the twin the reverse (0.176 vs 0.157); NOTES reported only the twin
+side. D4 now checks rank agreement and reports end-of-walk V next to mean-over-walk V.
 
 ### Parallel Moco workers in one directory (suspected, 1 failure in 18)
 
@@ -238,6 +317,9 @@ Development only. The DGX does the sweeps.
 ## Open questions
 
 - [ ] Resolve the threshold disagreement: 0.05 in code versus 0.02% in the paper. Which did they use?
+      Now the most important open constant: it moves the Phase C margin more than R does.
+- [ ] Rebuild the twin on measured data (Moco exampleEMGTracking, local): fixes push-off, the
+      heel-strike reserves, the stitching and the gastroc path, and gives EMG to validate against.
 - [ ] Confirm the tiring-rate constant is on the same scale between our calibration and the demo
       code values (15-20 there, 8.24 from our fit). Units need checking before values are reused.
 - [ ] Does the frozen-switch cap move if the person tires faster or slower? We fixed one tiring rate.

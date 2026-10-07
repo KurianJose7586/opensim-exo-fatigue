@@ -268,3 +268,33 @@ data (Phase A2), which is the supervisor's data-loading track.
 OpenSim, PyTorch and stable-baselines3 in one image, with the repo mounted rather than baked
 in. This reverses the earlier "separate images" plan. One image means one build and one
 `check`, and D4 needs OpenSim and the policy in the same process anyway.
+
+## Independent review (2026-10-07)
+
+### One device cap per joint, the full-cycle peak
+
+`p_j` caps the device at `p_j * peak|tau_net_j|`, where the peak is over the WHOLE gait cycle
+and the cap is the same on both legs. The half-cycle reference means each side's moments cover
+half the cycle, so the full-cycle peak is the larger of the two sides. Per-side caps made the
+second half of the cycle 3.6-9.4x under-assisted (observations.md). A real motor has one torque
+limit, not one per half-cycle.
+
+### Controllers see an estimate of fatigue, not the truth
+
+Policy and Phase C controllers observe V_est: the fatigue model integrated over the surrogate's
+predicted activations, which is what a device could run on board. The twin's true V scores only.
+Before, D4 fed the twin's own V back in, which leaked the hidden randomised parameters into the
+observation and made "robust to hidden parameters" optimistic.
+
+### Ablations, not more baselines
+
+`coupled` beat the baselines but differed from each in more than one way. Three ablations
+(`allocate.ABLATIONS`) each change one thing: the objective (independent_minmax), the cross-joint
+redistribution knowledge (local), the fatigue feedback (static). The claim is whatever survives
+them.
+
+### Keep the 2D model for now
+
+The model's own source says not to use it for research (gastroc path) and it has no real
+push-off. Chosen with Jasith: fix everything else on it first, treat ankle and gastroc results as
+blocked, and rebuild on the measured-data example (exampleEMGTracking) as the next step.

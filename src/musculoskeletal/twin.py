@@ -8,9 +8,25 @@ reference walking kinematics, both from OpenSim's example2DWalking. The
 reference is HALF a cycle; the gait is symmetric, so the right leg's second
 half is the left leg's first half. That is how the example itself is built.
 
+KNOWN LIMITS OF THIS MODEL (review 2026-10-07; NOTES.md sec. 9):
+  - The example's own header says "Do not use this model for research": the
+    gastrocnemius path is wrong. Its knee moment arm falls 2.5 -> 0.9 cm from
+    full extension to 57 deg flexion, and gastroc is one of the three
+    biarticular muscles the project's claim is about.
+  - Ground reaction comes from two contact spheres per foot driven by the
+    prescribed kinematics. Totals are right (mean vertical force = body
+    weight), but the load splits between heel and toe on ~1 deg differences:
+    the peak ankle moment is 42 Nm (~0.6 Nm/kg, normal push-off ~1.5), and
+    net moments jump where the two half-cycles are stitched.
+  - The right hip reserve peaks at ~125 Nm at heel strike, ~92% of the peak
+    hip moment. See reserve_max in the output.
+  Measured kinematics + force-plate GRF (OpenSim's Moco exampleEMGTracking,
+  shipped with the conda package) is the documented next step.
+
 Exoskeleton: an ideal assistive device at hip, knee and ankle on both legs
 (Dembia et al. 2017) -- torque actuators the optimiser uses freely, capped at
-p_j * peak net moment of joint j. p_j is the device's capacity at that joint,
+p_j * peak net moment of joint j over the FULL cycle (both half-windows), the
+same cap on both legs. p_j is the device's capacity at that joint,
 the quantity Phase C allocates under a shared budget. Device mass is added to
 the segments; leaving it out is the standard way to report a benefit that does
 not exist.
@@ -56,6 +72,7 @@ MUSCLES = ["hamstrings", "bifemsh", "glut_max", "iliopsoas", "rect_fem",
            "vasti", "gastroc", "soleus", "tib_ant"]
 BIARTICULAR = ["hamstrings", "rect_fem", "gastroc"]
 JOINTS = {"hip": "hip_flexion", "knee": "knee_angle", "ankle": "ankle_angle"}
+RESERVE_ORDER = [f"{c}_{s}" for c in JOINTS.values() for s in "lr"]   # reserve_*_joint layout
 N_PHASE = 100   # samples per full gait cycle
 
 # Per side. ponytail: generic powered-orthosis masses, not a specific device.
@@ -238,15 +255,20 @@ def _add_exo(model, peaks, p, capacity=1.0):
     re-solve showed it delivered only 85% (hip, knee) and 38% (ankle) of the
     intended moment, cause not found. A plain CoordinateActuator is exact by
     construction, and it works for the 3D model too.
+
+    ONE cap per joint, the same on both legs. Each side's moments cover only half
+    the cycle (the reference is half a cycle), so the joint's full-cycle peak is the
+    larger of the two. Capping each side by its own half-window peak made the left
+    device -- the stitched cycle's second half -- 3.6-9.4x weaker than p says.
     """
     for (joint, coord), pj in zip(JOINTS.items(), p):
         if pj <= 0:
             continue
+        lim = capacity * pj * max(peaks[f"{coord}_l"], peaks[f"{coord}_r"]) / EXO_F
         for side in "lr":
             act = osim.CoordinateActuator(f"{coord}_{side}")
             act.setName(f"exo_{joint}_{side}")
             act.setOptimalForce(EXO_F)
-            lim = capacity * pj * peaks[f"{coord}_{side}"] / EXO_F
             act.setMinControl(-lim)
             act.setMaxControl(lim)
             model.addForce(act)
@@ -270,7 +292,9 @@ def activations(subject=Subject(), condition=Condition(), p=(0.0, 0.0, 0.0)):
         sol.unseal()   # keep the failed trajectory: non-convergence is data (flagged by success)
 
     t = np.array(sol.getTimeMat())
-    half = np.linspace(t[0], t[-1], N_PHASE // 2)
+    # endpoint=False: right(t1) and left(t0) are the same gait phase, so including both
+    # would sample the stitch twice and leave each half 49 intervals long, not 50
+    half = np.linspace(t[0], t[-1], N_PHASE // 2, endpoint=False)
 
     def act(name):
         return np.interp(half, t, np.array(sol.getStateMat(next(s for s in sol.getStateNames() if s.endswith(f"/{name}/activation")))))
@@ -282,11 +306,16 @@ def activations(subject=Subject(), condition=Condition(), p=(0.0, 0.0, 0.0)):
     def rms(names):
         return float(np.sqrt(np.mean([np.mean(force(n) ** 2) for n in names])))
     res_names = [n for n in sol.getControlNames() if "reserve" in n]
+    # per joint, both legs: one pooled rms hid a ~125 Nm hip reserve at heel strike
+    joint_res = [_reserve_path(sol, f"{c}_{s}") for c in JOINTS.values() for s in "lr"]
     return {
         "acts": acts,
         "cycle_s": 2 * (t[-1] - t[0]),
         "residual_rms": rms([n for n in res_names if "pelvis" in n]),     # N / Nm, pelvis
         "reserve_rms": rms([n for n in res_names if "pelvis" not in n]),  # Nm, joints
+        "reserve_rms_joint": np.array([rms([n]) for n in joint_res]),     # (6,) RESERVE_ORDER
+        "reserve_max_joint": np.array([np.abs(force(n)).max() for n in joint_res]),
+        "peak_moment": np.array([max(peaks[f"{c}_l"], peaks[f"{c}_r"]) for c in JOINTS.values()]),
         "solve_s": solve_s,
         "success": success,
         "p": np.array(p),
@@ -324,10 +353,13 @@ def _check_scaling():
                    - (a.getTendonSlackLength() + a.getOptimalFiberLength() * cos)) < 1e-12
     dev = mass(nom) - m0                                   # device mass at scale 1
     assert abs(mass(fib) - m0 - 1.5 * dev) < 1e-9, "device mass scale not applied"
-    peaks = {f"{c}_{s}": 50.0 for c in JOINTS.values() for s in "lr"}
+    # unequal sides, as in the real half-window moments (left peaks 3.6-9.4x lower):
+    # both legs must still get the joint's full-cycle cap
+    peaks = {f"{c}_{s}": (50.0 if s == "r" else 10.0) for c in JOINTS.values() for s in "lr"}
     _add_exo(nom, peaks, (0.2, 0.2, 0.2), capacity=0.8)
     lims = [a.getMaxControl() for a in components(nom, osim.CoordinateActuator) if "exo_" in a.getName()]
-    assert len(lims) == 6 and np.allclose(lims, 0.8 * 0.2 * 50.0 / EXO_F), f"exo capacity not applied: {lims}"
+    assert len(lims) == 6 and np.allclose(lims, 0.8 * 0.2 * 50.0 / EXO_F), \
+        f"exo cap must be capacity * p * full-cycle peak, same on both legs: {lims}"
 
 
 if __name__ == "__main__":
@@ -336,6 +368,10 @@ if __name__ == "__main__":
     base = activations()
     print(f"unassisted: solve {base['solve_s']:.1f} s, success={base['success']}, "
           f"pelvis residual rms {base['residual_rms']:.1f}, joint reserve rms {base['reserve_rms']:.2f} Nm")
+    print("  peak net moment (full cycle): " + ", ".join(
+        f"{j} {m:.1f} Nm" for j, m in zip(JOINTS, base["peak_moment"])))
+    print("  reserve rms / max per joint:  " + ", ".join(
+        f"{n} {r:.1f}/{x:.0f}" for n, r, x in zip(RESERVE_ORDER, base["reserve_rms_joint"], base["reserve_max_joint"])))
     assisted = activations(p=(0.3, 0.3, 0.3))
     print(f"30% all joints: solve {assisted['solve_s']:.1f} s")
     print(f"\n{'muscle':<12}{'mean a, none':>14}{'mean a, 30%':>14}{'change':>9}")
