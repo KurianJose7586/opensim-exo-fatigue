@@ -37,9 +37,13 @@ RUN python -m pip install --no-cache-dir torch gymnasium stable-baselines3 casad
 # NOT casadi from conda: Moco bundles its own CasADi, and a second conda copy
 # in the same env made Moco fail ('get_forward' not defined). The pip wheel
 # keeps its DLLs inside site-packages, which is what src/mpc needs.
+# Never import opensim and casadi in ONE process: opensim loads Moco's libcasadi
+# first and the pip casadi then fails (undefined symbol). No script does that --
+# src/mpc uses casadi without opensim, the twin uses opensim without casadi.
 
-# Fail the build, not the job, if anything is missing
-RUN python -c "import opensim, torch, stable_baselines3, casadi; print('OpenSim', opensim.GetVersion(), 'torch', torch.__version__)"
+# Fail the build, not the job, if anything is missing. Separate processes, see above.
+RUN python -c "import opensim, torch, stable_baselines3; print('OpenSim', opensim.GetVersion(), 'torch', torch.__version__)" \
+ && python -c "import casadi; print('casadi', casadi.__version__)"
 
 ENV OPENSIM_MOCO_PARALLEL=1 PYTHONUNBUFFERED=1
 WORKDIR /work
