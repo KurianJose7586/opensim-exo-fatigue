@@ -270,8 +270,36 @@ the dataset page into `data/raw/exogait/`.
 ### The EMG files are not on Dryad
 
 The README says EMG is "stored in separate files", but version 449435 has 20 files: the 19
-participant CSVs and README.md. Either EMG is inside the CSVs or it was never uploaded. This
-blocks J6, K8 and H5 until the CSV headers are checked or the authors answer (J1 question 8).
+participant CSVs and README.md. **No CSV has an EMG column either** (all 19 headers checked).
+EMG is not in this release. This blocks J6, K8 and H5 until the authors answer (J1 question 8).
+The README gives clhost@ethz.ch and lvianello@sralab.org as contacts.
+
+### What the raw CSVs look like (`src/exogait/checks.py`, AB68 and HL03)
+
+- 68 named columns plus a leading unnamed index column. There are only 4 joint positions
+  (1 = L hip, 2 = L knee, 3 = R hip, 4 = R knee); the backpack is a separate `BackPackAngle`,
+  not a fifth joint as the README says. AB72 has the same columns but in a different order:
+  **load by name, never by index.**
+- **Signs match OpenSim.** Hip + = flexion: at heel strike in transparent walking the hip is at
+  +20 to +34°. Knee − = flexion: −85° to −0.6°, never positive. `BackPackAngle` averages 76–86°
+  and looks like an absolute trunk angle from horizontal. The hip angle is then probably
+  relative to the backpack. Unconfirmed.
+- `gait_cycle_left/right` are **integers** 0–99 (1% resolution). `gait_state_*` is 0–3.
+- Timing: median dt is 2.99 ms. AB68 has 30,878 intervals over 4.5 ms (6.6%) and 11 gaps over
+  0.1 s (rests removed, the longest 352 s). HL03 has 33 intervals with **dt ≤ 0**, and two stray
+  labels, `SM_UNDEFINED2` and `transparent_UNDEFINED2`. J3 has to handle all of this.
+- `UNDEFINED` rows are 60% of AB68 and 42% of HL03. Complete strides per condition are few:
+  about 30 walking strides per leg, but only 4–9 on stairs (AB68).
+- **Peak knee flexion per stride** (median, AB68 / HL03): walking 47–80°, ramps 37–73°,
+  **stairs 83–114°**. HL03 stops at 113–114° on stairs, which looks like the X2's mechanical
+  limit. Stairs therefore sit in the range where the 2D model's knee muscles are wrong (above).
+- **Transparent-mode torque is not near zero.** JointTorques RMS in AB68 walking is 18–20 Nm
+  (TR) vs 22–25 Nm (SM). This changes J1 question 2.
+- `DesiredJointTorques` tracks `JointTorques` closely (r = 0.87–0.95, same RMS): banning it is right.
+- **`JointTorquesViaGauges` is uncorrelated with `JointTorques`** (r = −0.20 to 0.02) and is
+  nonzero while standing. Which column is "measured torque" is an open question for J1.
+- `InteractionForces_{i+1}` correlates with `JointTorques_i` better than `InteractionForces_i`
+  does, which fits IF_1 = backpack and IF_2–5 = joints 1–4.
 
 ### K4 groundwork: knee moment arms in `2D_gait.osim`
 
