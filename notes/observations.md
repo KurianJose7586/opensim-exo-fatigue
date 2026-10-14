@@ -235,6 +235,96 @@ Development only. The DGX does the sweeps.
 
 ---
 
+## ExoGait plan (from 2026-10-14)
+
+### K1: environment and the stock MocoTrack example
+
+- **OpenSim 4.6** Windows release (`opensim-core-4.6-win.zip`, GitHub, 176 MB; it holds a second
+  zip) is unpacked to `C:\OpenSim 4.6`. This is the install MATLAB will use (`configureOpenSim.m`).
+  Its Python bindings are built for Python 3.11 (`python311.dll`). The zip ships the example
+  *scripts* but not their data: no 3D walking files, and no `referenceGRF` for the 2D example.
+- **Python:** micromamba 2.9.0 in `~/micromamba` (sha256 checked), env `opensim` from the
+  ONBOARDING recipe: Python 3.11.17, opensim 4.6 (opensim-org `py311np24`), numpy 2.4.6 on
+  OpenBLAS. No MKL, no conda casadi.
+- **MATLAB:** not installed yet; Kurian is installing it under the campus licence. K1 is not done
+  until MocoTrack also runs from MATLAB.
+- **Stock MocoTrack runs.** `example2DWalking.py`, the tracking problem, on `models/base/`
+  (the same files the example uses), with two edits: GRF tracking weight 0 (`referenceGRF` is
+  not shipped, and ExoGait has no GRF anyway), and stop after tracking. Optimal in 87 IPOPT
+  iterations: 34 s in IPOPT, 39 s wall (16 logical cores, 16 GB RAM). Tracking RMSE against the
+  filtered reference:
+
+  | pelvis_tilt | hip_l | hip_r | knee_l | knee_r | ankle_l | ankle_r | lumbar |
+  |---|---|---|---|---|---|---|---|
+  | 1.05° | 1.30° | 2.03° | 2.35° | 3.21° | 0.61° | 0.51° | 1.23° |
+
+- CasADi prints `intermediate_callback is disfunctional in your installation`. If so, deleting
+  the `delete_this_to_stop_optimization` file may not stop a solve in this build. Not tested.
+
+### Dryad blocks scripted downloads
+
+The file API (`/api/v2/files/{id}/download`) needs a bearer token (401). `/downloads/file_stream/`
+gives 403 to scripts and an Anubis bot-check page to the in-app browser. Download by hand from
+the dataset page into `data/raw/exogait/`.
+
+### The EMG files are not on Dryad
+
+The README says EMG is "stored in separate files", but version 449435 has 20 files: the 19
+participant CSVs and README.md. **No CSV has an EMG column either** (all 19 headers checked).
+EMG is not in this release. This blocks J6, K8 and H5 until the authors answer (J1 question 8).
+The README gives clhost@ethz.ch and lvianello@sralab.org as contacts.
+
+### What the raw CSVs look like (`src/exogait/checks.py`, AB68 and HL03)
+
+- 68 named columns plus a leading unnamed index column. There are only 4 joint positions
+  (1 = L hip, 2 = L knee, 3 = R hip, 4 = R knee); the backpack is a separate `BackPackAngle`,
+  not a fifth joint as the README says. AB72 has the same columns but in a different order:
+  **load by name, never by index.**
+- **Signs match OpenSim.** Hip + = flexion: at heel strike in transparent walking the hip is at
+  +20 to +34°. Knee − = flexion: −85° to −0.6°, never positive. `BackPackAngle` averages 76–86°
+  and looks like an absolute trunk angle from horizontal. The hip angle is then probably
+  relative to the backpack. Unconfirmed.
+- `gait_cycle_left/right` are **integers** 0–99 (1% resolution). `gait_state_*` is 0–3.
+- Timing: median dt is 2.99 ms. AB68 has 30,878 intervals over 4.5 ms (6.6%) and 11 gaps over
+  0.1 s (rests removed, the longest 352 s). HL03 has 33 intervals with **dt ≤ 0**, and two stray
+  labels, `SM_UNDEFINED2` and `transparent_UNDEFINED2`. J3 has to handle all of this.
+- `UNDEFINED` rows are 60% of AB68 and 42% of HL03. Complete strides per condition are few:
+  about 30 walking strides per leg, but only 4–9 on stairs (AB68).
+- **Peak knee flexion per stride** (median, AB68 / HL03): walking 47–80°, ramps 37–73°,
+  **stairs 83–114°**. HL03 stops at 113–114° on stairs, which looks like the X2's mechanical
+  limit. Stairs therefore sit in the range where the 2D model's knee muscles are wrong (above).
+- **Transparent-mode torque is not near zero.** JointTorques RMS in AB68 walking is 18–20 Nm
+  (TR) vs 22–25 Nm (SM). This changes J1 question 2.
+- `DesiredJointTorques` tracks `JointTorques` closely (r = 0.87–0.95, same RMS): banning it is right.
+- **`JointTorquesViaGauges` is uncorrelated with `JointTorques`** (r = −0.20 to 0.02) and is
+  nonzero while standing. Which column is "measured torque" is an open question for J1.
+- `InteractionForces_{i+1}` correlates with `JointTorques_i` better than `InteractionForces_i`
+  does, which fits IF_1 = backpack and IF_2–5 = joints 1–4.
+
+### K4 groundwork: knee moment arms in `2D_gait.osim`
+
+Sign conventions: `hip_flexion` is + for flexion, `knee_angle` is − for flexion (range −120° to
+10°). The reference pelvis tilt is about −15°. Right-leg knee moment arms (m; − = flexor):
+
+| knee angle | gastroc | hamstrings | bifemsh | rect_fem | vasti |
+|---|---|---|---|---|---|
+| 0° | −0.025 | −0.031 | −0.023 | 0.044 | 0.043 |
+| −40° | −0.014 | −0.045 | −0.041 | 0.034 | 0.030 |
+| −60° | −0.009 | −0.044 | −0.045 | 0.025 | 0.023 |
+| −80° | −0.004 | −0.038 | −0.044 | 0.013 | 0.014 |
+| −100° | +0.001 | −0.027 | −0.037 | 0.017 | 0.016 |
+
+This is the defect the example's header warns about: the gastroc path has no wrapping, so its
+flexor moment arm shrinks with flexion and flips sign near 100°. The quadriceps arms also fall
+to about 1.4 cm by 80°. Walking and ramps are usable **with a caveat**: their per-stride knee
+peaks reach 70–85° (data below), where the gastroc arm is near zero and the quadriceps arms are
+small. **Stairs (83–114°) go into the range where the knee muscles are wrong.** Before any stair result, fix the
+paths or switch models. The `Rajagopal_2015.osim` in the zip (`OpenSenseExample/`) has **no
+muscles**: it is the kinematics-only OpenSense copy. A muscled Rajagopal model has to come from
+`opensim-org/opensim-models`.
+
+---
+
 ## Open questions
 
 - [ ] Resolve the threshold disagreement: 0.05 in code versus 0.02% in the paper. Which did they use?
