@@ -235,6 +235,66 @@ Development only. The DGX does the sweeps.
 
 ---
 
+## ExoGait plan (from 2026-10-14)
+
+### K1: environment and the stock MocoTrack example
+
+- **OpenSim 4.6** Windows release (`opensim-core-4.6-win.zip`, GitHub, 176 MB; it holds a second
+  zip) is unpacked to `C:\OpenSim 4.6`. This is the install MATLAB will use (`configureOpenSim.m`).
+  Its Python bindings are built for Python 3.11 (`python311.dll`). The zip ships the example
+  *scripts* but not their data: no 3D walking files, and no `referenceGRF` for the 2D example.
+- **Python:** micromamba 2.9.0 in `~/micromamba` (sha256 checked), env `opensim` from the
+  ONBOARDING recipe: Python 3.11.17, opensim 4.6 (opensim-org `py311np24`), numpy 2.4.6 on
+  OpenBLAS. No MKL, no conda casadi.
+- **MATLAB:** not installed yet; Kurian is installing it under the campus licence. K1 is not done
+  until MocoTrack also runs from MATLAB.
+- **Stock MocoTrack runs.** `example2DWalking.py`, the tracking problem, on `models/base/`
+  (the same files the example uses), with two edits: GRF tracking weight 0 (`referenceGRF` is
+  not shipped, and ExoGait has no GRF anyway), and stop after tracking. Optimal in 87 IPOPT
+  iterations: 34 s in IPOPT, 39 s wall (16 logical cores, 16 GB RAM). Tracking RMSE against the
+  filtered reference:
+
+  | pelvis_tilt | hip_l | hip_r | knee_l | knee_r | ankle_l | ankle_r | lumbar |
+  |---|---|---|---|---|---|---|---|
+  | 1.05° | 1.30° | 2.03° | 2.35° | 3.21° | 0.61° | 0.51° | 1.23° |
+
+- CasADi prints `intermediate_callback is disfunctional in your installation`. If so, deleting
+  the `delete_this_to_stop_optimization` file may not stop a solve in this build. Not tested.
+
+### Dryad blocks scripted downloads
+
+The file API (`/api/v2/files/{id}/download`) needs a bearer token (401). `/downloads/file_stream/`
+gives 403 to scripts and an Anubis bot-check page to the in-app browser. Download by hand from
+the dataset page into `data/raw/exogait/`.
+
+### The EMG files are not on Dryad
+
+The README says EMG is "stored in separate files", but version 449435 has 20 files: the 19
+participant CSVs and README.md. Either EMG is inside the CSVs or it was never uploaded. This
+blocks J6, K8 and H5 until the CSV headers are checked or the authors answer (J1 question 8).
+
+### K4 groundwork: knee moment arms in `2D_gait.osim`
+
+Sign conventions: `hip_flexion` is + for flexion, `knee_angle` is − for flexion (range −120° to
+10°). The reference pelvis tilt is about −15°. Right-leg knee moment arms (m; − = flexor):
+
+| knee angle | gastroc | hamstrings | bifemsh | rect_fem | vasti |
+|---|---|---|---|---|---|
+| 0° | −0.025 | −0.031 | −0.023 | 0.044 | 0.043 |
+| −40° | −0.014 | −0.045 | −0.041 | 0.034 | 0.030 |
+| −60° | −0.009 | −0.044 | −0.045 | 0.025 | 0.023 |
+| −80° | −0.004 | −0.038 | −0.044 | 0.013 | 0.014 |
+| −100° | +0.001 | −0.027 | −0.037 | 0.017 | 0.016 |
+
+This is the defect the example's header warns about: the gastroc path has no wrapping, so its
+flexor moment arm shrinks with flexion and flips sign near 100°. The quadriceps arms also fall
+to about 1.4 cm by 80°. Walking and ramps (knee under about 65°) are usable with a caveat;
+**stairs reach the range where the knee muscles are wrong**. Before any stair result, fix the
+paths or switch models. `Rajagopal_2015.osim` ships in the zip under
+`Resources/Code/Python/OpenSenseExample/`.
+
+---
+
 ## Open questions
 
 - [ ] Resolve the threshold disagreement: 0.05 in code versus 0.02% in the paper. Which did they use?
