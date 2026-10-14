@@ -290,8 +290,9 @@ This is the defect the example's header warns about: the gastroc path has no wra
 flexor moment arm shrinks with flexion and flips sign near 100°. The quadriceps arms also fall
 to about 1.4 cm by 80°. Walking and ramps (knee under about 65°) are usable with a caveat;
 **stairs reach the range where the knee muscles are wrong**. Before any stair result, fix the
-paths or switch models. `Rajagopal_2015.osim` ships in the zip under
-`Resources/Code/Python/OpenSenseExample/`.
+paths or switch models. The `Rajagopal_2015.osim` in the zip (`OpenSenseExample/`) has **no
+muscles**: it is the kinematics-only OpenSense copy. A muscled Rajagopal model has to come from
+`opensim-org/opensim-models`.
 
 ---
 
