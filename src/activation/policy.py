@@ -2,7 +2,13 @@
 
 Environment (one step = one replan = REPLAN gait cycles, ~10 s of walking):
     observation  subject params, current condition (speed, load), per-muscle
-                 fatigue V (9), elapsed fraction of the walk
+                 fatigue ESTIMATE V_est (9), elapsed fraction of the walk.
+                 No device can measure V. V_est is what one could run on board:
+                 the fatigue model integrated over the SURROGATE's predicted
+                 activations. Inside the surrogate V_est = V; under the twin
+                 (D4) they part, because the twin carries hidden parameters the
+                 surrogate never saw. Policy and Phase C controllers act on
+                 V_est; reward and scores use the true V.
     action       assistance fraction at hip, knee, ankle; mapped to [0, P_MAX]
                  and scaled down onto the SAME budget Phase C's controllers get
     plant        acts = surrogate ensemble mean; V integrated over the cycles
@@ -26,6 +32,7 @@ Model-exploitation mitigations (guide D3, all three mandatory):
 """
 
 import argparse
+import json
 import sys
 import time
 from pathlib import Path
@@ -63,7 +70,7 @@ class WalkEnv(gym.Env):
 
     def _obs(self):
         x = (np.concatenate([self.subj, self.cond]) - self.lo) / (self.hi - self.lo) * 2 - 1
-        return np.concatenate([x, self.V, [self.t / self.n_steps]]).astype(np.float32)
+        return np.concatenate([x, self.V_est, [self.t / self.n_steps]]).astype(np.float32)
 
     def reset(self, seed=None, options=None):
         if seed is not None:
@@ -72,6 +79,7 @@ class WalkEnv(gym.Env):
         self.subj = np.asarray(o.get("subject", self.subjects[self.rng.integers(len(self.subjects))]))
         self.cond = self._cond()
         self.V = self.rng.uniform(0, 0.5, 9) if self.random_start and not o else np.zeros(9)
+        self.V_est = self.V.copy()     # the estimate starts where the walk starts
         self.n_steps = int(self.minutes * 60 / (REPLAN * cycle_s(self.cond[0])))
         self.t, self.peaks = 0, []
         return self._obs(), {}
@@ -82,15 +90,24 @@ class WalkEnv(gym.Env):
         return p * min(1.0, al.BUDGET / max(p.sum(), 1e-12))
 
     @torch.no_grad()
-    def plant(self, p):
+    def predict(self, p):
+        """Surrogate ensemble: mean activations, mean disagreement."""
         x = torch.tensor([*self.subj, *self.cond, *p], dtype=torch.float32, device=self.model.x_mean.device)
         mu, sd = self.model(x)
         return mu.cpu().numpy(), float(sd.mean())
 
+    def plant(self, p):
+        """-> (true activations, activations the on-board estimate integrates, sd).
+        Inside the surrogate the two are the same; TwinEnv (D4) swaps in the twin."""
+        mu, sd = self.predict(p)
+        return mu, mu, sd
+
     def step(self, a, p=None):
         p = self.to_p(a) if p is None else np.asarray(p)
-        acts, sd = self.plant(p)
-        self.V = al.cycle(self.V, acts, float(cycle_s(self.cond[0])), self.C, n=REPLAN)
+        acts, est, sd = self.plant(p)
+        cs = float(cycle_s(self.cond[0]))
+        self.V = al.cycle(self.V, acts, cs, self.C, n=REPLAN)
+        self.V_est = al.cycle(self.V_est, est, cs, self.C, n=REPLAN)
         self.t += 1
         self.peaks.append(self.V.max())
         r = -self.V.max() - al.LAM * float(p @ p) - BETA * sd
@@ -121,7 +138,7 @@ def allocator_act(kind):
             cache.clear()
             cache[key] = al.Allocator(env.model.amap(env.subj, env.cond),
                                       float(cycle_s(env.cond[0])), env.C)
-        return cache[key](kind, env.V)
+        return cache[key](kind, env.V_est)   # what a device could know, not the true V
     return act
 
 
@@ -190,6 +207,17 @@ if __name__ == "__main__":
         ranges = {"mass_scale": [0.8, 1.25], "strength_scale": [0.7, 1.3],
                   "speed_scale": [0.8, 1.25], "load_kg": [0, 20]}
         subjects = np.random.default_rng(0).uniform([0.8, 0.7], [1.25, 1.3], (5, 2))
+
+        class Skewed(WalkEnv):   # true plant 1.5x the estimate, as when the twin differs
+            def plant(self, p):
+                mu, sd = self.predict(p)
+                return np.clip(mu * 1.5, 0, 1), mu, sd
+        e = Skewed(_toy_model(), subjects, ranges, minutes=1.0, random_start=False)
+        e.reset(seed=0, options={"subject": subjects[0]})
+        obs, *_ = e.step(np.zeros(3))
+        assert np.allclose(obs[4:13], e.V_est) and (e.V > e.V_est + 1e-6).any(), \
+            "policy must observe the estimate V_est, while the true V drives scoring"
+
         env = WalkEnv(_toy_model(), subjects, ranges, minutes=3.0)
         sac = train(env, steps=4000)
         res = compare(WalkEnv(_toy_model(), subjects, ranges, minutes=3.0, random_start=False),
@@ -213,5 +241,8 @@ if __name__ == "__main__":
     sac = train(WalkEnv(model, train_s, ranges, a.minutes), a.steps)
     out = ROOT / "results" / f"policy_{Path(a.surrogate).stem}.zip"
     sac.save(out)
+    # D4 replays walks of the same length: the elapsed-fraction input is out of
+    # distribution otherwise. validate.py reads this and warns on a mismatch.
+    out.with_suffix(".json").write_text(json.dumps({"minutes": a.minutes, "steps": a.steps}))
     print(f"  -> {out.relative_to(ROOT)}\n\nHELD-OUT subjects, inside the surrogate (D4 checks the twin):\n")
     table(compare(WalkEnv(model, test_s, ranges, a.minutes, random_start=False), sac, test_s))

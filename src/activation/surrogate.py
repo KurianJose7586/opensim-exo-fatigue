@@ -119,6 +119,14 @@ def train(X, Y, sid, steps=20000, lr=1e-3, batch=256, members=MEMBERS, seed=0, l
     return model.eval()
 
 
+def vstar(acts, speed_scale):
+    """Steady-state per-muscle fatigue V* = B / (1 - A) of each sample's gait cycle."""
+    sys.path.insert(0, str(ROOT / "src" / "allocation"))
+    import allocate as al
+    A, B = al.cycle_map(acts, cycle_s(speed_scale)[:, None, None], al.C_ZHANG)
+    return B / (1 - A)
+
+
 @torch.no_grad()
 def evaluate(model, X, Y):
     mu, sd = model(torch.as_tensor(X, device=DEVICE))
@@ -128,14 +136,23 @@ def evaluate(model, X, Y):
     per_sample_err = np.sqrt((err ** 2).mean((1, 2)))
     per_sample_sd = sd.mean((1, 2))
     calib = np.corrcoef(per_sample_err, per_sample_sd)[0, 1] if len(X) > 2 else np.nan
+    # Fatigue switches at M_th = 0.05, where activation errors of a few hundredths flip a
+    # sample between fatigue and recovery. Activation rmse alone hides that; the error that
+    # reaches the objective is in V*. X[:, 2] is speed_scale (x_subject 2, then condition).
+    v_hat, v = vstar(mu, X[:, 2]), vstar(Y, X[:, 2])
     return {"rmse": float(np.sqrt((err ** 2).mean())), "r2": float(r2),
             "rmse_per_muscle": np.sqrt((err ** 2).mean((0, 1))), "sd_mean": float(sd.mean()),
-            "err_sd_corr": float(calib)}
+            "err_sd_corr": float(calib),
+            "vstar_mae_per_muscle": np.abs(v_hat - v).mean(0),
+            "vstar_worst_mae": float(np.abs(v_hat.max(1) - v.max(1)).mean()),
+            "vstar_worst_rel": float(np.abs(v_hat.max(1) / v.max(1) - 1).mean())}
 
 
 def report(name, m):
     print(f"  {name}: rmse {m['rmse']:.4f}  R2 {m['r2']:.3f}  ensemble sd {m['sd_mean']:.4f}  "
           f"corr(error, sd) {m['err_sd_corr']:+.2f}")
+    print(f"    steady-state worst-muscle fatigue V*: mean abs error {m['vstar_worst_mae']:.4f} "
+          f"({m['vstar_worst_rel']:.1%}) -- compare with the effect sizes being claimed")
 
 
 def _toy():
@@ -180,7 +197,8 @@ if __name__ == "__main__":
     m = evaluate(model, X[te], Y[te])
     report("HELD-OUT SUBJECTS", m)
     print("  rmse per muscle:", np.array2string(m["rmse_per_muscle"], precision=4))
+    print("  V* abs error per muscle:", np.array2string(m["vstar_mae_per_muscle"], precision=4))
     out = ROOT / "results" / f"surrogate_{Path(a.data).stem}.pt"
     model.save(out, data=a.data, test_subjects=np.unique(sid[te]), train_subjects=np.unique(sid[tr]),
-               test_metrics={k: v for k, v in m.items() if k != "rmse_per_muscle"})
+               test_metrics={k: v for k, v in m.items() if not k.endswith("per_muscle")})
     print(f"  -> {out.relative_to(ROOT)}")

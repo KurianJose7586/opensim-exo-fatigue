@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Every stage of the project, one command each. See docs/RUN_ON_DGX.md.
 #
-#   bash run_pipeline.sh check              all self-checks + one twin solve      ~5 min
+#   bash run_pipeline.sh check              all self-checks + one twin solve      ~12 min
 #   bash run_pipeline.sh phase_c            Phase C on the twin (125 solves)      ~15 min at 64 cores
 #   bash run_pipeline.sh d1 [tier]          D1 population sweep                   tier-dependent
 #   bash run_pipeline.sh d2 [tier]          D2 surrogate ensemble (GPU if present)
@@ -21,11 +21,14 @@ W=${WORKERS:-$(nproc)}
 py() { python -u "$@"; }
 
 case "$STAGE" in
-  check)
+  check)                       # every self-check in src/, cheapest first
+    py src/fatigue/model.py
     py src/fatigue/calibrate.py
     py src/mpc/mfac.py
     py src/allocation/allocate.py
     py src/activation/surrogate.py
+    py src/activation/policy.py
+    py src/mpc/periodic.py
     py src/musculoskeletal/twin.py ;;
   phase_c)
     py src/jobs/sweep.py run configs/phase_c_grid.yaml --workers "$W" --retry-failed

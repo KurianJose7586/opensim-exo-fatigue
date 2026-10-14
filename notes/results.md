@@ -271,7 +271,8 @@ no text search, so scoop risk is unassessed.
 
 ## 5. Gate A: the OpenSim twin (`src/musculoskeletal/twin.py`, 2026-10-02)
 
-Reduced 2D model (gait10dof18musc), exo at hip/knee/ankle on both legs, 6.6 kg of device mass.
+Reduced 2D model (gait10dof18musc), exo at hip/knee/ankle on both legs, 8.6 kg of device mass
+(`DEVICE_MASS`: pelvis 2 x 2.0, femur/tibia 1.0 and calcn 0.3 per side).
 One evaluation = two MocoInverse solves: an ID-equivalent solve for net joint moments, then the
 muscle solve with the assistance applied.
 
@@ -337,7 +338,32 @@ see section 7.
   **0.9 ms vs 62 s** per twin evaluation (~70,000×). Too short and too small to mean anything
   scientifically, but every stage now runs on the corrected twin and the numbers hang together.
 
+### 6c. Smoke re-run after the independent review (2026-10-07)
+
+Fixed twin (one cap per joint), D4 with V_est observation, rank-agreement check and fatigue-space
+surrogate error. Same 18-solve smoke config; D3 3k steps, D3 and D4 both on 1-minute walks.
+
+- **D1:** 18/18 converged. Reserve peaks per joint (median): right hip 117 Nm, right knee 60 Nm.
+- **D2:** held-out-subject R² 0.10 with 2 training subjects. V* error on the worst muscle **22%**
+  (iliopsoas 0.15 absolute). The activation rmse (0.036) looks small; the fatigue error does not.
+- **D3, inside the surrogate:** coupled −19% vs none, policy −7% (3k steps, untrained).
+- **D4 against the twin:**
+
+```
+controller   worst V twin   worst V sur   final twin   final sur
+none             0.359         0.184         0.508        0.230
+coupled          0.347         0.149         0.492        0.186
+rl_policy        0.157         0.172         0.198        0.214
+```
+
+  Twin and surrogate rank the controllers differently and the new check warns. The surrogate is
+  off by 2x on "none" for this held-out subject, so the retention numbers (0.35, 16.8) are
+  meaningless. This run checks wiring only. Policy latency 0.63 ms vs 64 s per twin evaluation.
+
 ## 7. Phase C on the real twin (`src/allocation/run_phase_c.py`, 2026-10-02)
+
+> **SUPERSEDED by section 9.** Computed with the per-side device cap bug (the device was
+> 3.6-9.4x weaker than p for the second half of every gait cycle). Kept as the record.
 
 125 MocoInverse solves (device capacity 0–0.4 at each joint in steps of 0.1), 125/125 converged,
 joint reserve RMS median 5.0 Nm. Nominal subject, normal walking, 10-minute walk, shared budget
@@ -383,6 +409,9 @@ present the first version as a baseline we beat. It was our own mis-specified co
 
 ## 8. Two checks on the Phase C result (2026-10-07)
 
+> **SUPERSEDED by section 9.** Computed with the per-side device cap bug (the device was
+> 3.6-9.4x weaker than p for the second half of every gait cycle). Kept as the record.
+
 ### The coupled optimum sits between grid points — checked with a real solve
 
 Coupled's allocation, p = (0.2, 0.05, 0.35), is interpolated between grid points: knee 0.05 and
@@ -420,3 +449,73 @@ Ma et al. 2010 (see `observations.md`, "Recovery rate is borrowed, not measured"
   fast walking, where fatigue is real. D1 already covers those conditions (load 0–20 kg, speed
   ×0.8–1.25).
 - Reproduce: set `allocate.R` and rerun `allocate.compare` on `results/phase_c_grid.npz`.
+
+## 9. Phase C after the independent review (2026-10-07)
+
+Fixes behind these numbers (observations.md, "Review 2026-10-07"): one device cap per joint from
+the full-cycle peak (was per side, half-window), the stitch no longer samples the junction twice.
+125/125 solves converged, joint reserve RMS median 5.0 Nm; reserve PEAKS per joint (median over
+the grid): right hip 99 Nm, right knee 43 Nm, everything else ~0. Old grid in `results/pre_review/`.
+
+Nominal subject, normal walking, 10 minutes, budget sum(p) <= 0.6, M_th = 0.05, R = 0.5:
+
+```
+controller           worst V   vs none   worst muscle   mean p (hip knee ankle)   torque cap
+none                  0.463      +0%      iliopsoas      0    0    0                   0 Nm
+knee_only             0.420      -9%      iliopsoas      0    0.15 0                  13 Nm
+independent           0.184     -60%      soleus         0.19 0.11 0.30               48 Nm
+blind                 0.183     -60%      soleus         0.2  0.1  0.3                49 Nm
+coupled               0.168     -64%      soleus         0.1  0.1  0.4                39 Nm
+--- ablations ---
+independent_minmax    0.197     -58%      soleus         0.18 0.18 0.24               50 Nm
+local                 0.174     -62%      soleus         0.15 0.1  0.35               44 Nm
+static                0.168     -64%      soleus         0.1  0.1  0.4                39 Nm
+```
+
+**Coupled beats the best baseline (now blind, 0.183) by 8.6%**, about the same margin as before
+the fix, but by a different route: the best allocation moved from (0.2, 0.05, 0.35) to
+(0.1, 0.1, 0.4). The ankle sits at its P_MAX cap, so the optimum is constrained, and it is
+ankle-heavy on the one joint this model gets worst (no real push-off; observations.md). It
+equalises iliopsoas (0.167) and soleus (0.168). It also gets the LEAST device torque capacity of
+the assisted controllers (sum of p_j x peak moment: 39 Nm vs 48-50), so the margin is not bought
+with a bigger device.
+
+**Every controller verified with a real twin solve at its final p** (`run_phase_c.py --verify`):
+interpolated and real steady-state worst V agree to 0.003 or better for all seven (coupled 0.168
+both). The "7-9%" hedge from section 8 is no longer needed at the nominal constants.
+
+**What the margin is made of (ablations):**
+- `static` = `coupled` exactly, again. **Fatigue feedback contributes nothing** in steady walking;
+  the result is a fixed allocation chosen offline.
+- `independent_minmax` 0.197 is WORSE than `independent` 0.184: the min-max objective applied joint
+  by joint does not help. The objective only pays off when the joints are optimised together.
+- `local` 0.174: planning jointly on an anatomically local model (each muscle responds only to the
+  joints it crosses) recovers 0.009 of the 0.015 gap from blind to coupled. The remaining 0.006
+  (about 40% of the margin) needs the cross-joint redistribution a local model cannot see, e.g.
+  knee assistance raising soleus 0.100 -> 0.110 while gastroc drops 0.102 -> 0.075.
+  Before the fix, `local` lost almost all of the margin (0.206 vs 0.186).
+
+**Sensitivity: coupled vs best baseline over the two unmeasured fatigue constants:**
+
+```
+    M_th    R=0.33     R=0.5     R=1.0     R=2.4
+   0.011     +0.0%     +0.0%     +0.0%     +0.0%
+    0.02     -4.4%     -4.9%     -5.4%     -3.5%
+    0.03     -5.2%     -5.6%     -6.5%     -5.2%
+    0.05     -8.9%     -8.6%     -8.3%     -3.5%    <- current
+    0.08     -8.7%     -9.6%     -8.0%     -4.2%
+```
+
+- Coupled never loses, but the margin ranges from **0% to ~10%**, and M_th moves it more than R.
+- At M_th = 0.011, just above Moco's 0.01 activation floor, coupled only ties the best baseline.
+- At the paper's literal "0.02% of MVC" (0.0002) nothing ever recovers and min-max is undefined.
+- **Quote:** "8.6% at the lineage's constants (M_th = 0.05, R = 0.5); 3.5-10% for M_th 0.02-0.08,
+  R 0.33-2.4; no advantage as M_th approaches the activation floor."
+
+**Soleus flag: resolved.** Ankle-only 0.3 now lowers soleus 23%, and both halves of the cycle
+respond (−24% / −20%; the second half was −5% before the fix). The weaker response in the
+all-joints test (−11%) is the knee coupling above, not a defect.
+
+**Still blocking any claim:** one subject, one condition, the 2D model whose own source says not
+to use it for research (gastroc path), and an ankle without a real push-off, the joint the
+optimum now leans on hardest.

@@ -6,9 +6,10 @@
 # Test:   docker run --rm -v "$PWD":/work opensim-exo:4.6 bash run_pipeline.sh check
 # GPU:    add --gpus all; torch picks the GPU up for D2/D3, everything else is CPU.
 #
-# NOT YET BUILT: written and checked against a working Windows install of the same
-# packages (OpenSim 4.6, Python 3.11), but the Linux image itself has not been built.
-# The `check` stage below is the first thing to run -- it fails in minutes if anything is off.
+# Built and checked on every PR and push to main by .github/workflows/docker-check.yml
+# (GitHub's ubuntu runner, CPU only): image build + `run_pipeline.sh check`, which runs
+# every self-check and real Moco solves. Never yet run on the DGX itself -- run `check`
+# there first; it fails in minutes if anything is off.
 
 FROM ubuntu:22.04
 
