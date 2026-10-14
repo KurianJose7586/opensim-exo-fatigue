@@ -104,8 +104,8 @@ separate `BackPackAngle`.
 | Stairs | **83–114°** (HL03 stops at 113–114°, probably the X2's mechanical limit) |
 
 In `2D_gait.osim` the gastrocnemius knee moment arm flips sign near 100°, and the quadriceps
-arms fall to about 1.4 cm by 80°. **Stairs need a different model or fixed muscle paths. Walking
-reaches 80° too**, so walking results also need the caveat.
+arms fall to about 1.4 cm by 80°. **Stairs (83–114°) need a different model or fixed muscle paths. Walking
+and ramps reach 70–85° too** (AB68 ramp maxima 79–91°), so their results also need the caveat.
 
 ## Leakage
 
