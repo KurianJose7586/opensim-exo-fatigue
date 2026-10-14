@@ -316,8 +316,9 @@ Sign conventions: `hip_flexion` is + for flexion, `knee_angle` is − for flexio
 
 This is the defect the example's header warns about: the gastroc path has no wrapping, so its
 flexor moment arm shrinks with flexion and flips sign near 100°. The quadriceps arms also fall
-to about 1.4 cm by 80°. Walking and ramps (knee under about 65°) are usable with a caveat;
-**stairs reach the range where the knee muscles are wrong**. Before any stair result, fix the
+to about 1.4 cm by 80°. Walking and ramps are usable **with a caveat**: their per-stride knee
+peaks reach 70–85° (data below), where the gastroc arm is near zero and the quadriceps arms are
+small. **Stairs (83–114°) go into the range where the knee muscles are wrong.** Before any stair result, fix the
 paths or switch models. The `Rajagopal_2015.osim` in the zip (`OpenSenseExample/`) has **no
 muscles**: it is the kinematics-only OpenSense copy. A muscled Rajagopal model has to come from
 `opensim-org/opensim-models`.
