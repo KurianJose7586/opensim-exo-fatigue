@@ -48,8 +48,9 @@ python src/fatigue/model.py       # 9 s
   4.6 build supports). Working recipe on Windows, with standalone micromamba, no Anaconda needed:
 
   ```bash
-  micromamba create -n opensim -c opensim-org -c conda-forge python=3.11 opensim       "libblas=*=*openblas" numpy scipy pandas pyyaml matplotlib
-  micromamba run -n opensim python -m pip install torch gymnasium stable-baselines3
+  micromamba create -n opensim -c opensim-org -c conda-forge python=3.11 opensim=4.6 "libblas=*=*openblas" numpy scipy pandas pyyaml matplotlib scikit-learn
+  micromamba run -n opensim python -m pip install torch --index-url https://download.pytorch.org/whl/cpu   # NVIDIA GPU: .../whl/cu126 instead
+  micromamba run -n opensim python -m pip install gymnasium stable-baselines3   # parked Phase D only
   micromamba run -n opensim python src/musculoskeletal/twin.py     # Gate A, ~1-2 min
   ```
 
@@ -148,5 +149,5 @@ messy complete record beats a clean partial one, and the write-up is built from 
 ## 8. Who to ask
 
 **Kurian** for anything about the project. **The supervisors** control the cluster images and the
-GPU allocation, and are handling the MATLAB side — the current asks are written up in
+GPU allocation — the current asks are written up in
 [`docs/progress_update.md`](docs/progress_update.md).
