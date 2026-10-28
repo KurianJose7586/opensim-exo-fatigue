@@ -35,7 +35,9 @@ def check(subj):
     torque = [f"{p}_{i}" for p in ("JointTorques", "DesiredJointTorques", "JointTorquesViaGauges") for i in JOINTS]
     d = pd.read_csv(f, usecols=["time", "condition", "BackPackAngle", "gait_cycle_left", "gait_cycle_right",
                                 "step_number_l", "step_complete_l", "step_number_r", "step_complete_r"]
-                    + [f"JointPositions_{i}" for i in JOINTS] + [f"InteractionForces_{i}" for i in range(1, 6)] + torque)
+                    + [f"JointPositions_{i}" for i in JOINTS] + [f"InteractionForces_{i}" for i in range(1, 6)] + torque
+                    + [f"{p}_{i}" for p in ("JointVelocities", "SM_Stiffness", "SM_Equilibrium_Angle", "SM_Damping",
+                                            "SM_Equilibrium_Velocity") for i in JOINTS])
 
     dt = np.diff(d.time.to_numpy())
     print(f"rows {len(d)}, time {d.time.iloc[0]:.2f}..{d.time.iloc[-1]:.2f} s, median dt {np.median(dt) * 1e3:.3f} ms; "
@@ -74,14 +76,24 @@ def check(subj):
                 parts.append(f"{col} {np.sqrt((x ** 2).mean()):.1f} ({np.corrcoef(jt, x)[0, 1]:.2f})")
             print(f"  {name}: " + ", ".join(parts))
 
-    return hs_hip, knee_max
+    # SM impedance torque K(eq - q) + D(eqv - qdot) pushes the angle toward eq. If JointTorques shares
+    # the angle sign (so OpenSim's), it rises with that torque
+    sm = d[d.condition == "SM_WALKING"]
+    slope = [np.polyfit(sm[f"SM_Stiffness_{i}"] * (sm[f"SM_Equilibrium_Angle_{i}"] - sm[f"JointPositions_{i}"])
+                        + sm[f"SM_Damping_{i}"] * (sm[f"SM_Equilibrium_Velocity_{i}"] - sm[f"JointVelocities_{i}"]),
+                        sm[f"JointTorques_{i}"], 1)[0] for i in JOINTS]
+    print("SM walking, slope of JointTorques on the impedance torque:", dict(zip(JOINTS.values(), np.round(slope, 2))))
+
+    return hs_hip, knee_max, slope
 
 
 if __name__ == "__main__":
     assert not headers(), "EMG columns found -- update notes (J1 Q8)"
     for s in sys.argv[1:] or ["AB68"]:
-        hs_hip, knee_max = check(s)
+        hs_hip, knee_max, slope = check(s)
         # the K4 mapping assumes X2 signs equal OpenSim's: hip + flexion, knee - flexion
         assert min(hs_hip) > 5, f"{s}: hip not flexed at heel strike -- hip sign differs from OpenSim"
         assert max(knee_max) < 5, f"{s}: knee goes positive -- knee sign differs from OpenSim"
-    print("\nOK: no EMG columns; hip + = flexion and knee - = flexion, as in OpenSim")
+        assert min(slope) > 0.5, f"{s}: JointTorques does not follow the SM impedance -- torque sign differs"
+    print("\nOK: no EMG columns; hip + = flexion and knee - = flexion, as in OpenSim; "
+          "+JointTorques drives the angle +, so it is the OpenSim generalized force sign")

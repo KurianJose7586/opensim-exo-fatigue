@@ -324,6 +324,80 @@ paths or switch models. The `Rajagopal_2015.osim` in the zip (`OpenSenseExample/
 muscles**: it is the kinematics-only OpenSense copy. A muscled Rajagopal model has to come from
 `opensim-org/opensim-models`.
 
+### K4: the X2 model and the angle mapping (`src/exogait/x2model.py`, 2026-10-28)
+
+- **No OpenSim bindings needed.** The micromamba `opensim` env had disappeared from `~/micromamba`
+  by 2026-10-28 (`~/.conda/environments.txt` still lists it), so `x2model.py` edits the .osim as
+  XML and checks it with `opensim-cmd` from the OpenSim 4.6 install, in any Python with
+  numpy/pandas/scipy/matplotlib. K4's tracking trials also ran MocoStudy `.omoco` files through
+  `opensim-cmd run-tool`; their stock run matched K1 within 0.3°. K5 needs the env rebuilt.
+- **X2 mass is 20.7 kg**, not twin.py's generic 8.6 kg: Küçüktabak et al. 2023 (IEEE T-RO) Table II,
+  backpack 10.3, thigh 2.84, shank 1.11, foot 1.25 kg per side; COMs from the CORC controller's
+  `x2_params.yaml`. Model mass goes from 62.0 to 82.7 kg (+33%). Inverse dynamics (`opensim-cmd`) on
+  the reference walk, X2 model minus base: pelvis_ty force +203.2 N on average, against 20.7·g =
+  203.0 N, so OpenSim sees the added mass. Peak torque is 80 Nm per joint (T-RO), but the data reach
+  85–89 Nm. The backpack COM is placed with the backpack axis = pelvis y axis, which is c off
+  (0.25 sin|c| m, 6 cm for AB68).
+- **Rotor inertia and friction are left out.** T-RO gives 1.87 kg m² apparent rotor inertia per
+  joint (against 2.29 kg m² for the whole straight leg about the hip). 1.87·q̈ is 10–19 Nm RMS of
+  the 16–24 Nm measured `JointTorques` (q̈ from differentiated velocity, so approximate), so
+  `JointTorques` looks motor-side. K6/K7 subtract 1.87·q̈ and the Table III friction before
+  comparing or replaying. Table III and CORC's yaml swap the Coulomb and viscous labels (J1).
+- **Torque sign = OpenSim's.** In SM walking, `JointTorques` rises with the impedance torque
+  K(eq − q) + D(eqv − q̇) at every joint (slope 0.88–1.35 AB68, 1.08–1.53 HL03), so +torque drives
+  the angle +. `checks.py` asserts it. `JointTorquesViaGauges` has no consistent sign against it
+  (r −0.4 to +0.4).
+- **The X2 hip is measured from the backpack**, so `thigh = BackPackAngle − 90 + hip`. Checked on all
+  19: in quiet standing the hip moves against the backpack (median slope −1.13) and this thigh angle
+  comes out vertical (−0.02 ± 4.1°). In walking it matches the reference's pelvis_tilt + hip_flexion
+  (r 0.92). The backpack's absolute level differs by site (walking BP − 90: AB +3.4°, HL −9.6°), so
+  the split into pelvis and hip needs a per-participant constant c, holding the mean pelvis tilt at
+  the reference's −15.06°. **c: AB −11.5 to −23.8°, HL −0.8 to −9.6° (AB68 −14.2°, HL03 −5.4°).**
+  c borrows the reference subject's tilt; a calibration posture or IMU mounting angle from the
+  authors would replace it (J1). Knee needs no change.
+- **BackPackAngle has artefacts the gyro does not see**: smooth 20–35° excursions over 2–3 s, mostly
+  at AB (`x2model.py`'s filter drops 19 of AB68's 39 clean TR + SM strides; HL 0–1.3%). They only
+  touch pelvis_tilt and c, so the filter drops strides from those only, not from hip and knee. An
+  excursion about one stride long looks like a ramp, which a range comparison after detrending
+  misses, so the filter also compares BackPackAngle's end-start change with the integrated gyro
+  (> 5° rejects). Without that, one AB68 TR stride with a +19.9° ramp (gyro +1.4°) moved c by
+  0.56° and doubled the TR pelvis SD (2.3 → 4.8°).
+- **The target is the mean stride**, right heel strike to right heel strike, of the clean strides of
+  one participant × condition (single strides sit 3.8–4.6° RMS from it; averaging lowers the knee
+  peak by 1–4°). Its end-start mismatch is removed by a ramp centred on mid-stride, so it is
+  periodic and keeps its mean. Full cycle, no L/R symmetry: AB68's knee peaks are −70° R, −57° L.
+- **AB68 TR walking**: 17 clean strides (2.80 ± 0.13 s), 9 gyro-confirmed for pelvis_tilt. Mapped vs
+  the reference: right hip at right heel strike 42.5° (reference 38.1°); hip peaks 62–63°
+  (reference 39°); knee peaks −70° R, −57° L (reference −45°); pelvis_tilt −20 to −14° (reference
+  −15 ± 0.2°). HL03 TR: 51 strides, hip peaks 52–55°. Stride-to-stride SD 4–5° on hip and knee
+  (HL03: 2–6° over all five); AB68 TR pelvis_tilt 2.3°, end-start mismatch 0.7°.
+- **OpenSim reads the target back**: an AnalyzeTool run plays the .sto through the X2 model and returns
+  the same angles to within 2e-6°, with the 10 coordinates in the expected order.
+- **The self-check passes on all 19 × TR/SM walking sets.** Its mapping checks hold for every
+  participant; the hip and knee ones do not depend on c:
+  - right hip ahead of the left at right heel strike: at least 20°, reference 37°
+  - each knee peaks in its own swing: R at 70–91%, L at 21–40%
+  - pelvis_tilt stays within −40..0° (data: about −29 to −5°)
+  - the mean stride is periodic with its mean kept, and its time axis is the mean stride duration
+
+  c itself is still unchecked: c = 0 passes. Ramps and stairs give 0–15 clean strides under the
+  same filters (the bout-edge rule drops 2 per pass); revisit before K5 ramps.
+- **K5 tracking trial** (MocoTrack of hip and knee only, on the model's own reference, half cycle,
+  through `opensim-cmd`):
+  - tracking hip and knee alone gives plausible walking; leaving pelvis_tilt free costs ~1.3° on
+    tilt and nothing on hip or knee;
+  - control effort weight 10 (the example's) drifted into pinned bounds or a wrong gait in 3 of 7
+    runs; weight 1 converged correctly 4 of 4 (160–546 iterations);
+  - `MocoAverageSpeedGoal` ignores direction (one run walked backwards at 1.33 m/s); a final-value
+    bound on `pelvis_tx` works. With no speed at all the model walked 21% slow with 5–7° hip bias;
+  - a free ankle pins its −15° bound at push-off: widen to ±30°. A tracked generic ankle at weight
+    0.1 is imposed (followed to 0.4°); use ≤ 0.01;
+  - peak vertical GRF is 1.8–1.95 BW even fully tracked: a property of this contact model;
+  - Moco's default mesh (0.02 s) gives 125–185 intervals on a 2.5–3.7 s X2 stride vs ~24 in K1;
+    start at T/50.
+- Not from `x2model.py`: the 19-participant hip-frame checks, the ID mass check and the tracking
+  trial came from throwaway K4 investigation scripts. `x2model.py` asserts the mass from the .osim.
+
 ---
 
 ## Open questions

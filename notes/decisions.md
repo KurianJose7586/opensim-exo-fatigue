@@ -338,3 +338,21 @@ between.
     they hand off through CSV and `.sto`.
 - **The parked DGX/Docker pipeline** is Python, so it is usable again. It is expected for K9 at
   full scale: one ExoGait stride is about 2.9 s, so the Moco solves take minutes each.
+
+### 2026-10-28: K4 mapping: the X2 hip is split into pelvis and hip with a per-participant c
+
+The X2 hip encoder reads the thigh relative to the backpack, not the pelvis (checked on all 19:
+`notes/observations.md`, "K4"). So `pelvis_tilt` = `BackPackAngle` − 90° + c and `hip_flexion` =
+X2 hip − c, with knee unchanged. Their sum, the thigh angle, does not depend on c.
+
+- **c per participant**, holding the mean walking pelvis tilt at the 2D reference's −15.06°.
+  c = 0 puts the hip about 12° below the model's range, and one global c would carry the 13°
+  AB-vs-HL backpack offset into the pelvis. A per-trial c would erase the real TR-vs-SM
+  backpack shift.
+- **Rejected:** a fixed hip offset (the best constant varies +3 to +16° by condition) and
+  treating the backpack as the torso (pelvis tilt −28 to 0°, carrying the site offset).
+- **Revisit** if the authors give a calibration posture or the IMU mounting angle (J1).
+
+The tracking target is the **mean of clean strides**, made periodic with its mean kept, not one
+stride: single strides are 3.8–4.6° RMS from the mean and their end-start mismatch is 1.4–5.5°.
+K5 starts there for cost and settings, then moves to single strides for K7's per-stride cases.

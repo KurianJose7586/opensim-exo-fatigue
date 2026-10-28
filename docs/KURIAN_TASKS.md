@@ -96,7 +96,7 @@ with `src/fatigue` on `sys.path`).
 | K1 | Environment and data | — | M | **done** (PR #6, approved, not merged). MATLAB part dropped. Env follow-up below |
 | K2 | Preprocessing at scale (RO1) | J3 (preprocess); J4 (`split.py`, for the last done-when bullet) | L | todo |
 | K3 | Nonlinear torque models (RO2, H1–H3) | K2, J4, J5 | L | todo |
-| K4 | OpenSim model and X2 mapping (RO3) | K1, J2 | L | **in progress** |
+| K4 | OpenSim model and X2 mapping (RO3) | K1, J2 | L | **in progress**: model, mapping and torque sign done; Jasith's plot check left |
 | K5 | MocoTrack: reproduce the gait | K4 | L | todo |
 | K6 | Personalised twin state (Layer 4) | K5; J1b (soft: generic anthropometry is the default) | M | todo |
 | K7 | AI + Moco integration (RO4, H4) | K3, K5, K6, J1 Q5 | L | todo |
@@ -113,8 +113,10 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
   That problem is a 0.47 s half-cycle with a symmetry goal, not an ExoGait stride (K5, K9).
 - All 19 CSVs in `data/raw/exogait/` (gitignored). Dryad blocks scripted downloads: by hand.
 - Details: `notes/observations.md`, "K1".
-- **Follow-up (S, now):** add scikit-learn and the CUDA torch wheel to the env (Shared rules).
-  Done when `torch.cuda.is_available()` prints True. torch and opensim stay in separate
+- **Follow-up (S, now):** the env was gone from `~/micromamba` by 2026-10-28 (K4 worked
+  around it). Rebuild it from ONBOARDING §2, which now includes scikit-learn, with the CUDA torch
+  wheel (Shared rules). Done when `torch.cuda.is_available()` prints True and the K1 example
+  solves again. torch and opensim stay in separate
   processes (Shared rules), so no one-process test is needed.
 
 ### K2 — Preprocessing at scale (RO1)
@@ -196,32 +198,35 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
   ablation (GPR: personalised scheme only; LSTM: no H2 arm; both stated), per participant, mode
   and controller. The test set is touched once.
 
-### K4 — OpenSim model and X2 mapping (RO3) · in progress
+### K4 — OpenSim model and X2 mapping (RO3) · in progress (waiting on Jasith's plot check)
 
-- **Code:** `src/exogait/x2model.py`, opensim Python API. Reuse from `twin.py`:
-  - `components()`;
-  - the device-mass pattern of `_body_model`;
-  - the exo `CoordinateActuator` pattern of `_add_exo`, for hip and knee only;
-  - reserves at every coordinate (`ModOpAddReserves(..., False)`, decisions.md 2026-10-02).
+- **Code:** `src/exogait/x2model.py` (~10 s). It edits `2D_gait.osim` as XML and has
+  `opensim-cmd` load it and play the target back, so it needs no OpenSim bindings (written while
+  the env was gone). It follows `twin.py`'s device-mass and `_add_exo` patterns (`EXO_F` = 100)
+  rather than importing them. Reserves go on in K5's `ModelProcessor`.
 - **Model:**
   - `models/base/2D_gait.osim`, sagittal, as the mentor suggests. Generic anthropometry, stated:
     ExoGait has none.
-  - X2 mass from Kucuktabak et al., IEEE T-RO (arXiv 2301.06244), Table II: backpack 10.3 kg,
-    plus thigh and shank links per leg.
-  - Hip and knee exo actuators, both legs, bounded by the X2 torque limits (cite the source).
-- **Mapping:**
-  - `hip_flexion_{l,r}` = `JointPositions_{1,3}` and `knee_angle_{l,r}` = `JointPositions_{2,4}`.
-    Same signs as OpenSim, radians (J2; `checks.py` asserts it).
-  - The X2 hip angle is relative to the backpack: thigh angle = `BackPackAngle` − 90° + hip.
-    Pelvis tilt therefore comes from `BackPackAngle`. Check it against the model's reference
-    tilt of about −15°.
-  - The ankle is not recorded. Use the stock reference ankle, time-normalised to the stride and
-    loosely tracked (the J1 Q7 default). Write the choice down.
-  - Stride = right heel strike to right heel strike, where `gait_cycle_right` wraps 99 → 0. J3
-    uses the same rule. Once `preprocess.py` lands, `x2model.py` imports its stride function
-    and drops its own.
-  - **Torque sign:** J2 covered angles only. Check the `JointTorques` sign against the OpenSim
-    coordinate sign here, before K5 replays it.
+  - X2 mass 20.7 kg welded on: Kucuktabak et al., IEEE T-RO (arXiv 2301.06244), Table II,
+    backpack 10.3 kg, thigh 2.84, shank 1.11 and foot plate 1.25 kg per leg; COMs from CORC.
+  - Hip and knee exo actuators, both legs, ±80 Nm (T-RO Sec. II-A; the data reach 85–89 Nm, so
+    K7's replay needs wider bounds). Rotor inertia (1.87 kg m² per joint) and friction are left
+    out: `JointTorques` looks motor-side, so K6/K7 subtract them.
+- **Mapping (done):**
+  - `knee_angle` = X2 knee; `hip_flexion` = X2 hip − c; `pelvis_tilt` = `BackPackAngle` − 90° + c.
+    The X2 hip is measured from the backpack (checked on all 19). c is per participant and holds
+    the mean pelvis tilt at the reference's −15.06°, because the backpack level differs by site
+    (AB68 −14.2°, HL03 −5.4°, range −0.6 to −23.8°). c is a K6 parameter.
+  - **Torque sign (done):** `+JointTorques` drives the angle +, so it is OpenSim's generalized
+    force sign: exo control = `JointTorques` / 100. `checks.py` asserts it from the SM impedance law.
+  - Target = the mean of the clean strides of one participant × condition, right heel strike to
+    right heel strike, made periodic with its mean kept. `BackPackAngle` strides the gyro does
+    not confirm are dropped from `pelvis_tilt` and c only. Once `preprocess.py` lands,
+    `x2model.py` imports its stride function and drops its own.
+  - The ankle is not in the target. K5 tracks the stock reference ankle at weight ≤ 0.01 (the
+    J1 Q7 default; at 0.1 the trial ankle followed it to 0.4°, i.e. imposed) or leaves it free,
+    with bounds widened to ±30°.
+  - Details and numbers: `notes/observations.md`, "K4".
 - **Scope:**
   - Walking and ramps: per-stride knee peaks of 70–85°, ramp maxima up to 91° (AB68). Usable
     with the moment-arm caveat in `notes/observations.md`. Report the share of ramp strides
@@ -232,17 +237,17 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
   - Stairs (83–114°) wait for J1 Q10.
 - **Out:**
   - `results/exogait/model/2D_gait_x2.osim`;
-  - `results/exogait/coords/<ID>_<stride>.sto`;
-  - plots in `results/exogait/plots/` for Jasith to review.
+  - `results/exogait/coords/<ID>_<condition>_mean.sto`;
+  - the review plot `figures/k4_ab68_tr_walking_mapping.png` (committed, so Jasith sees it in the PR).
 - **Done when:**
-  - the model loads and its coordinate list is verified;
-  - one participant's hip/knee trajectories map with sensible signs (plot checked by Jasith);
-  - the self-check asserts the added device mass, and that there are 4 exo actuators and none
-    at the ankle;
-  - the `JointTorques` sign vs the OpenSim coordinate sign is checked on one SM walking stride
-    (the SM impedance pushes toward `SM_Equilibrium_Angle`; cross-check with
-    `twin.net_moments()` if that is ambiguous) and written into `docs/exogait_data.md`;
-  - the zero-offset **[open]** line in `docs/exogait_data.md` is updated with the result.
+  - **done:** the model loads and its coordinate list is verified;
+  - **left:** one participant's hip/knee trajectories map with sensible signs (plot checked by Jasith);
+  - **done:** the self-check asserts the added device mass, and that there are 4 exo actuators and none
+    at the ankle (it passes on all 19 × TR/SM walking);
+  - **done:** the `JointTorques` sign is checked against the SM impedance law (all 4 joints, AB68 and
+    HL03); **left:** written into `docs/exogait_data.md` once PR #7 merges;
+  - **left:** the zero-offset **[open]** line in `docs/exogait_data.md` is updated with the c mapping
+    (same PR #7 dependency).
 
 ### K5 — MocoTrack: reproduce the gait
 
@@ -254,9 +259,19 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
     the stride: the median is 2.9 s, against the example's 0.47 s half-cycle. The example's
     symmetry trick is not needed.
   - **Replace the example's bounds:** knee −120°…10° (the model's range; the example stops at
-    −50°), hip from the data range (the X2 reaches −18°), `pelvis_tilt` from `BackPackAngle` ±
-    10°, `pelvis_tx` unbounded above.
+    −50°), hip −25…95° (mapped with c it reaches 78°), `pelvis_tilt` from the mapped
+    `BackPackAngle` ± 10°, ankle ±30°, `pelvis_tx` unbounded above.
   - No GRF tracking (ExoGait has no GRF; weight 0, as in K1).
+  - **Settings from K4's tracking trial** (hip/knee-only tracking of the model's own reference;
+    `notes/observations.md`, "K4"):
+    - control effort weight 1, not the example's 10 (at 10, 3 of 7 runs pinned bounds or found a
+      wrong gait);
+    - speed as a final-value bound on `pelvis_tx` (v·T), never `MocoAverageSpeedGoal`, which
+      ignores direction (one run walked backwards). Without any speed the model walked 21% slow.
+      Where v comes from for the X2 is open (walkway length / bout time is the default);
+    - `pelvis_tilt` tracked at a low weight (about 0.2× hip/knee, untested) or free;
+    - initial guess: the tracked states, `pelvis_tx` = v·t, `pelvis_ty` = 0.90 m, ankle 0;
+    - mesh interval T/50 first, then T/100 as the check.
   - No hard periodicity: a real stride is not periodic.
   - The exo actuators replay the measured X2 torque (`hip_tau, knee_tau` and
     `hip_tau_other, knee_tau_other` of the right stride in `<ID>_strides.csv`), in both modes,
@@ -268,9 +283,10 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
     supports it.
 - **Ramps:** rotate the floor `ContactHalfSpace` by the site's ramp angle per solve (5° Chicago,
   6° Madrid; the site comes from J1 Q12; the sign comes from up or down).
-- **Cost first:** on one walking stride, record solve time and peak memory, and compare a mesh
-  interval of 0.04–0.05 s with Moco's default 0.02 s. Keep the coarser one if the tracking RMSE
-  barely changes. K9's scope rests on these numbers.
+- **Cost first:** on the periodic mean stride `x2model.py` writes (HL03 SM first: the most
+  symmetric, 46 strides), record solve time and peak memory, and compare a mesh interval of
+  0.04–0.05 s with Moco's default 0.02 s. Keep the coarser one if the tracking RMSE barely
+  changes. Then single strides. K9's scope rests on these numbers.
 - **Order:** one walking stride (cost), then walking for one participant, TR then SM. Then ramps.
   Stairs only after J1 Q10.
 - **Out:** `results/exogait/moco/<ID>_<stride>_measured.sto` and a row in
