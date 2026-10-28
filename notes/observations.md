@@ -240,14 +240,15 @@ Development only. The DGX does the sweeps.
 ### K1: environment and the stock MocoTrack example
 
 - **OpenSim 4.6** Windows release (`opensim-core-4.6-win.zip`, GitHub, 176 MB; it holds a second
-  zip) is unpacked to `C:\OpenSim 4.6`. This is the install MATLAB will use (`configureOpenSim.m`).
+  zip) is unpacked to `C:\OpenSim 4.6`. With MATLAB dropped (`notes/decisions.md`, 2026-10-28)
+  it is only where the example scripts come from.
   Its Python bindings are built for Python 3.11 (`python311.dll`). The zip ships the example
   *scripts* but not their data: no 3D walking files, and no `referenceGRF` for the 2D example.
 - **Python:** micromamba 2.9.0 in `~/micromamba` (sha256 checked), env `opensim` from the
   ONBOARDING recipe: Python 3.11.17, opensim 4.6 (opensim-org `py311np24`), numpy 2.4.6 on
   OpenBLAS. No MKL, no conda casadi.
-- **MATLAB:** not installed yet; Kurian is installing it under the campus licence. K1 is not done
-  until MocoTrack also runs from MATLAB.
+- **MATLAB: dropped.** The college has no MATLAB licence (the MathWorks account offers only
+  "Link License"). K1 is done in Python. Decision and reasons in `notes/decisions.md` (2026-10-28).
 - **Stock MocoTrack runs.** `example2DWalking.py`, the tracking problem, on `models/base/`
   (the same files the example uses), with two edits: GRF tracking weight 0 (`referenceGRF` is
   not shipped, and ExoGait has no GRF anyway), and stop after tracking. Optimal in 87 IPOPT
@@ -297,7 +298,7 @@ The README gives clhost@ethz.ch and lvianello@sralab.org as contacts.
   (TR) vs 22–25 Nm (SM). This changes J1 question 2.
 - `DesiredJointTorques` tracks `JointTorques` closely (r = 0.87–0.95, same RMS): banning it is right.
 - **`JointTorquesViaGauges` is uncorrelated with `JointTorques`** (r = −0.20 to 0.02) and is
-  nonzero while standing. Which column is "measured torque" is an open question for J1.
+  nonzero while standing. Which column is "measured torque" is an open question for J1 (Q9).
 - `InteractionForces_{i+1}` correlates with `JointTorques_i` better than `InteractionForces_i`
   does, which fits IF_1 = backpack and IF_2–5 = joints 1–4.
 

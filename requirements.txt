@@ -5,13 +5,17 @@ matplotlib
 pandas
 pyyaml
 
+# ExoGait models (src/exogait/): ridge, forests, GPR
+scikit-learn
+
 # MPC baseline + fatigue layer -- same solver stack as Zhang et al. (CasADi + IPOPT)
 casadi
 
-# Phase D: surrogate ensemble (D2) and RL policy (D3)
+# PyTorch: ExoGait LSTM/GRU (K3); Phase D (parked) surrogate and RL policy
 torch
 gymnasium
 stable-baselines3
 
-# NOTE: OpenSim is not on PyPI. It needs its own Python 3.11 conda env -- see
-# ONBOARDING.md section 2. On the DGX everything runs in docs/Dockerfile.opensim.
+# NOTE: OpenSim is not on PyPI. All ExoGait work runs in the Python 3.11 conda env `opensim`
+# (ONBOARDING.md section 2), on both machines. No MATLAB (notes/decisions.md, 2026-10-28).
+# On the DGX everything runs in docs/Dockerfile.opensim.
