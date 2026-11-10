@@ -39,6 +39,7 @@ from pathlib import Path
 import numpy as np
 import opensim as osim
 
+import preprocess
 import x2model
 
 MOCO = x2model.OUT / "moco"
@@ -90,6 +91,16 @@ def peak_mem_gb():
     k32.K32GetProcessMemoryInfo.argtypes = [ctypes.c_void_p, ctypes.POINTER(PMC), ctypes.c_ulong]
     k32.K32GetProcessMemoryInfo(k32.GetCurrentProcess(), ctypes.byref(pmc), ctypes.sizeof(pmc))
     return pmc.peak / 2 ** 30
+
+
+def ground_forces(model, sol):
+    """The vertical ground reaction on each foot along a solution: time [s] and {side: force [N]}, from the contact spheres."""
+    names = [osim.StdVectorString(), osim.StdVectorString()]
+    for v, s in zip(names, "rl"):
+        v.append(f"contactHeel_{s}")
+        v.append(f"contactFront_{s}")
+    grf = osim.createExternalLoadsTableForGait(model, sol, *names)
+    return np.array(grf.getIndependentColumn()), {s: grf.getDependentColumn(f"ground_force_{s}_vy").to_numpy() for s in "rl"}
 
 
 def solve(subj="HL03", cond="SM_WALKING", n_mesh=50, guess=SEED, case="measured", exo_w=None, max_iter=3000):
@@ -261,14 +272,9 @@ def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name):
     for c in ("ankle_angle_l", "ankle_angle_r", "lumbar"):
         row[f"min_{c}"], row[f"max_{c}"] = round(val(c).min(), 1), round(val(c).max(), 1)
     row["min_pelvis_ty"] = round(float(np.array(sol.getStateMat(f"{VALUE['pelvis_ty']}/value")).min()), 3)
-    names = [osim.StdVectorString(), osim.StdVectorString()]
-    for v, s in zip(names, "rl"):
-        v.append(f"contactHeel_{s}")
-        v.append(f"contactFront_{s}")
-    grf = osim.createExternalLoadsTableForGait(model, sol, *names)
     bw = model.getTotalMass(model.getWorkingState()) * 9.80665
-    for s in "rl":
-        row[f"peak_grf_bw_{s}"] = round(grf.getDependentColumn(f"ground_force_{s}_vy").to_numpy().max() / bw, 3)
+    for s, f in ground_forces(model, sol)[1].items():
+        row[f"peak_grf_bw_{s}"] = round(f.max() / bw, 3)
     try:
         check(row | {"_range": {c: (val(c).min(), val(c).max()) for c in VALUE if c not in ("pelvis_tx", "pelvis_ty")},
                      "_pelvis_bounds": (lo, hi)})
@@ -338,15 +344,10 @@ def plot(subj, cond, n_mesh=50, case="measured"):
     axs[1, 0].set_ylabel("deg")
     model = osim.ModelProcessor(str(MODEL)).process()
     model.initSystem()
-    names = [osim.StdVectorString(), osim.StdVectorString()]
-    for v, s in zip(names, "rl"):
-        v.append(f"contactHeel_{s}")
-        v.append(f"contactFront_{s}")
-    grf = osim.createExternalLoadsTableForGait(model, sol, *names)
     bw = model.getTotalMass(model.getWorkingState()) * 9.80665
-    tg = 100 * np.array(grf.getIndependentColumn()) / t[-1]
+    tg, force = ground_forces(model, sol)
     for s in "rl":
-        axs[1, 1].plot(tg, grf.getDependentColumn(f"ground_force_{s}_vy").to_numpy() / bw, color=color[s], lw=2.2, label=f"model ({s.upper()})")
+        axs[1, 1].plot(100 * tg / t[-1], force[s] / bw, color=color[s], lw=2.2, label=f"model ({s.upper()})")
     axs[1, 1].set_title("vertical ground reaction (not recorded: estimated)", fontsize=10)
     axs[1, 1].set_ylabel("body weights (model + X2)")
     for a, c in EXO.items():
@@ -447,6 +448,59 @@ def moment_vs_torque(subj, n_mesh=50):
     return rows, png
 
 
+def load_split(subj, cond, n_mesh=50, case="measured"):
+    """K6, a held-out check: the right foot's share of the vertical ground force through the stride. The model's
+    comes from the solution's contact forces. The measured one is StanceInterpolationFactor, which the X2 computes
+    from the force sensors in its footplates (Lhoste et al. 2026); in the data it is 1 in right single support
+    and 0 in left. The tracking never sees it. Returns the measured mean and SD over the kept right strides
+    (preprocess.py) and the model's share, all on x2model.P."""
+    d = preprocess.read_strides([subj], usecols=["leg", "mode", "controller", "stance_alpha"])
+    a = d[(d.leg == "R") & (d["mode"] == "walk") & (d.controller == preprocess.CONTROLLERS[cond.split("_")[0]])]
+    a = a.stance_alpha.to_numpy().reshape(-1, 101)
+    proc = osim.ModelProcessor(str(MODEL))
+    proc.append(osim.ModOpAddReserves(1.0, 1000.0, False))
+    model = proc.process()
+    model.initSystem()
+    t, f = ground_forces(model, osim.MocoTrajectory(str(MOCO / f"{subj}_{cond}_mean_{case}_m{n_mesh}.sto")))
+    return a.mean(0), a.std(0, ddof=1), np.interp(x2model.P, t / t[-1], f["r"] / np.maximum(f["r"] + f["l"], 1e-9))
+
+
+def load_splits(n_mesh=50):
+    """K6: load_split() for every `measured` walking solve -> moco/load_split.csv and figures/k6_load_split.png."""
+    import matplotlib.pyplot as plt
+    rows, curves = [], {c: [] for c in x2model.WALKING}
+    for f in sorted(MOCO.glob(f"*_WALKING_mean_measured_m{n_mesh}.sto")):
+        subj, cond = f.name[:4], f.name[5:].split("_mean_")[0]
+        m, sd, share = load_split(subj, cond, n_mesh)
+        rows.append(dict(participant=subj, condition=cond, r=round(float(np.corrcoef(m, share)[0, 1]), 3),
+                         rmse=round(float(np.sqrt(np.mean((m - share) ** 2))), 3), stride_sd=round(float(sd.mean()), 3),
+                         measured_at_heel_strike=round(float(m[0]), 2), model_at_heel_strike=round(float(share[0]), 2)))
+        curves[cond].append((m, share))
+    with open(MOCO / "load_split.csv", "w", newline="") as f:
+        wr = csv.DictWriter(f, fieldnames=list(rows[0]))
+        wr.writeheader()
+        wr.writerows(rows)
+    fig, axs = plt.subplots(1, 2, figsize=(12, 4.2), sharey=True)
+    for ax, cond in zip(axs, ("SM_WALKING", "transparent_WALKING")):
+        m, share = (np.array(v) for v in zip(*curves[cond]))
+        x = 100 * x2model.P
+        for y, col, lab in ((m, "#52514e", "measured by the footplates (StanceInterpolationFactor)"), (share, "#2a78d6", "model: contact forces of the solved stride")):
+            ax.fill_between(x, y.mean(0) - y.std(0), y.mean(0) + y.std(0), color=col, alpha=0.16, lw=0)
+            ax.plot(x, y.mean(0), color=col, lw=2.2, label=lab + ", mean ± SD over participants")
+        r = np.median([q["r"] for q in rows if q["condition"] == cond])
+        ax.set_title(f"{'State machine' if cond.startswith('SM') else 'Transparent'}: {len(m)} participants, median r = {r:.2f}", fontsize=10, loc="left")
+        ax.set_xlabel("% of the stride, from right heel strike")
+        ax.grid(alpha=0.25)
+    axs[0].set_ylabel("right foot's share of the vertical ground force")
+    axs[0].legend(frameon=False, fontsize=9, loc="lower left")
+    fig.suptitle("A held-out check of the twin: the load split between the feet. The tracking never sees the footplate signal", fontsize=11, x=0.01, ha="left")
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    png = x2model.ROOT / "figures" / "k6_load_split.png"
+    fig.savefig(png, dpi=130)
+    plt.close(fig)
+    return rows, png
+
+
 def params():
     """K6: results/exogait/params.csv, one row per participant: what the twin uses for them."""
     rows = []
@@ -477,6 +531,15 @@ if __name__ == "__main__":
         out, rows = params()
         assert len(rows) == 19 and all(-30 < r["hip_offset_c_deg"] < 5 for r in rows), "params: 19 participants, c in range"
         print(f"OK: {out}: {len(rows)} participants, c {min(r['hip_offset_c_deg'] for r in rows)}..{max(r['hip_offset_c_deg'] for r in rows)} deg")
+        sys.exit()
+    if sys.argv[1:2] == ["load"]:   # track.py load: every `measured` walking solve on disk
+        rows, png = load_splits()
+        r = np.array([q["r"] for q in rows])
+        assert len(rows) >= 30 and np.median(r) > 0.7, f"the model's load split does not follow the footplates: median r {np.median(r):.2f}"
+        print(f"OK: {len(rows)} solves; r median {np.median(r):.2f}, range {r.min():.2f}..{r.max():.2f}; RMSE median "
+              f"{np.median([q['rmse'] for q in rows]):.2f} of the share (stride-to-stride SD {np.median([q['stride_sd'] for q in rows]):.2f}); "
+              f"at heel strike: measured {np.median([q['measured_at_heel_strike'] for q in rows]):.2f}, model "
+              f"{np.median([q['model_at_heel_strike'] for q in rows]):.2f} (medians). Figure: {png}")
         sys.exit()
     if sys.argv[1:2] == ["k6"]:   # track.py k6 [ID]: needs that participant's SM and TR solves
         rows, png = moment_vs_torque(sys.argv[2] if len(sys.argv) > 2 else "HL03")

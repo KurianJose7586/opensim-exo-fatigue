@@ -25,8 +25,10 @@ import torch
 from torch import nn
 
 HIDDEN, LAYERS = 64, 2   # no dropout between the layers: with it, cuDNN crashes Python on exit here (torch 2.14.1+cu126, Windows)
-BATCH, LR, LR_FINE = 64, 1e-3, 3e-4   # strides per batch; Adam's step from scratch and when fine-tuning
-MAX_EPOCHS, PATIENCE = 200, 20
+BATCH, LR, LR_FINE = 64, 3e-3, 3e-4   # strides per batch; Adam's step from scratch and when fine-tuning
+MAX_EPOCHS, PATIENCE = 600, 40
+# HIDDEN and LR from a grid on the val blocks (64 or 128; 1e-3 or 3e-3; three folds, population, gauge torque): the four
+# land within 0.1 Nm of each other (3.40-3.50 on the stopping rows), so the fastest is used: 120-134 epochs, 23 s a fit
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 
