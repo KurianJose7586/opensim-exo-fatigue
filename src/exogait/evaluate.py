@@ -3,7 +3,7 @@
     python src/exogait/evaluate.py                  # self-check: the two baselines on AB68 and HL03, val blocks
     python src/exogait/evaluate.py all              # the baselines, every participant, scored on val
     python src/exogait/evaluate.py all --test       # the final pass: refit on train + val, score test, once
-    python src/exogait/evaluate.py all --models ... # K3's models, on Kurian's machine
+    python src/exogait/evaluate.py all --models rf,bag,lstm   # K3's models, on Kurian's machine (hours)
 
 In: data/processed/exogait/<ID>_strides.csv of every participant on disk, and splits.csv.
 Out: results/exogait/predict/<model>.csv, one row per RESULT_KEY with rmse, mae, r2, nrmse, infer_ms,
@@ -15,7 +15,9 @@ What is compared, per participant, on the same scored strides:
     scheme    personalised: fitted on the participant's own blocks.
               population: fitted on every other participant's (leave one participant out).          H1
     ablation  full; no_phase: without phase, gait_state and stance_alpha, which all encode phase;    H2
-              no_mode.                                                                               H3
+              no_mode;                                                                               H3
+              no_accel: without the joint accelerations (below). Not one of the mentor's hypotheses:
+              it tests K6's finding that half the motor torque is rotor inertia x acceleration
     torque    motor (JointTorques) and gauge (JointTorquesViaGauges, the torque at the joint; the
               one K5-K7 replay), fitted separately (J1 Q9)
 Fitted on train blocks and scored on val blocks. With --test: fitted on train + val, scored on test.
@@ -25,11 +27,18 @@ RMSE, MAE, R2, and nRMSE = RMSE / the range of the measured torque over all that
 strides in that mode (both controllers, so SM and TR share a scale). infer_ms: the predict call,
 per stride.
 
-A model is built from the input columns it may use, takes stride rows (a DataFrame, 101 rows per
-stride in phase order) and returns (n, 2) Nm: hip, knee.
+Inputs are split.ALLOWED plus "accel": the time derivative of every allowed velocity, taken along the
+stride in features(). It is derived from recorded inputs only, so it exists at inference.
+A model is built from the inputs it may use and the number of training rows, takes stride rows (a
+DataFrame, whole strides, 101 rows each in phase order) and returns (n, 2) Nm: hip, knee.
     phase_mean  the training torque averaged over mode, controller, leg and phase, whichever the ablation leaves
     ridge       StandardScaler + Ridge(alpha 1) on features(): the scaler sees the training rows only.
                 Not tuned: val RMSE is the same to 0.1% for alpha 0.01-100 (four participants, both schemes)
+    rf, bag     RandomForestRegressor on features(), 100 trees, leaves of 5 rows or more. rf tries a third
+                of the inputs at each split; bag tries all of them, which is bagged trees
+                (BaggingRegressor(DecisionTreeRegressor()) with the same trees, only slower). Each tree
+                sees at most TREE_ROWS rows: a full-depth forest on a 400,000-row fold would not fit in memory
+    lstm        lstm.py (K3)
 Every model here is offline: phase and the 101-point time base need the next heel strike (J1 Q4).
 """
 
@@ -40,6 +49,7 @@ import time
 
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import FunctionTransformer, StandardScaler
@@ -49,7 +59,10 @@ from split import ALLOWED, TARGETS
 
 RESULTS = ROOT / "results" / "exogait" / "predict"
 SCHEMES = ("personalised", "population")
-ABLATIONS = {"full": [], "no_phase": ["phase", "gait_state", "stance_alpha"], "no_mode": ["mode"]}
+INPUTS = ALLOWED + ["accel"]
+ABLATIONS = {"full": [], "no_phase": ["phase", "gait_state", "stance_alpha"], "no_mode": ["mode"], "no_accel": ["accel"]}
+TREE_ROWS = 60_000   # rows per tree. Personalised fits have fewer and use them all
+N_JOBS = 8           # of 16 threads: the laptop stays usable
 CATEGORIES = {"mode": list(MODES.values()), "controller": list(CONTROLLERS.values()), "leg": ["L", "R"],
               "group": ["AB", "HL"], "gait_state": [0, 1, 2, 3]}
 RESULT_KEY = ["model", "scheme", "ablation", "torque", "participant", "mode", "controller", "joint", "split"]
@@ -57,8 +70,16 @@ ID = ["participant", "stride", "leg", "mode", "controller", "phase", "t"]
 
 
 def features(d, cols):
-    """Stride rows -> input matrix: numbers as they are, phase also as two harmonics (it is cyclic), categories one-hot."""
-    X = [d[c].to_numpy(float) for c in cols if c not in CATEGORIES]
+    """Stride rows -> input matrix: numbers as they are, the velocities' derivative along the stride ("accel"),
+    phase also as two harmonics (it is cyclic), categories one-hot."""
+    assert len(d) % 101 == 0 and (d.phase.to_numpy()[::101] == 0).all(), "features() needs whole strides in phase order"
+    X = [d[c].to_numpy(float) for c in cols if c not in CATEGORIES and c != "accel"]
+    if "accel" in cols:
+        # ponytail: a central difference on the 101-point grid (13-110 ms apart). A Savitzky-Golay derivative of
+        # the raw 333 Hz velocity is the upgrade if the motor torque's residual turns out to matter
+        t = d.t.to_numpy().reshape(-1, 101)
+        step = (t[:, -1:] - t[:, :1]) / 100
+        X += [(np.gradient(d[c].to_numpy(float).reshape(-1, 101), axis=1) / step).ravel() for c in cols if c.endswith("_qd") or "_qd_" in c]
     if "phase" in cols:
         a = 2 * np.pi * d.phase.to_numpy() / 100
         X += [f(h * a) for h in (1, 2) for f in (np.sin, np.cos)]
@@ -69,7 +90,7 @@ def features(d, cols):
 class PhaseMean:
     """Baseline 1: the training torque averaged over the keys the ablation leaves."""
 
-    def __init__(self, cols):
+    def __init__(self, cols, n=None):
         self.keys = [c for c in ("mode", "controller", "leg", "phase") if c in cols]
 
     def fit(self, d, y):
@@ -82,8 +103,16 @@ class PhaseMean:
         return np.where(np.isnan(p), self.rest, p)
 
 
+def forest(max_features):
+    return lambda cols, n: make_pipeline(
+        FunctionTransformer(features, kw_args={"cols": cols}),
+        RandomForestRegressor(100, min_samples_leaf=5, max_features=max_features, max_samples=TREE_ROWS if n > TREE_ROWS else None,
+                              n_jobs=N_JOBS, random_state=0))
+
+
 MODELS = {"phase_mean": PhaseMean,
-          "ridge": lambda cols: make_pipeline(FunctionTransformer(features, kw_args={"cols": cols}), StandardScaler(), Ridge())}
+          "ridge": lambda cols, n: make_pipeline(FunctionTransformer(features, kw_args={"cols": cols}), StandardScaler(), Ridge()),
+          "rf": forest(1 / 3), "bag": forest(1.0)}
 
 
 def metrics(y, yhat, span):
@@ -113,10 +142,10 @@ def evaluate(d, ids, models, test=False, out=RESULTS):
                 assert len(train) and set(train.split) <= set(fit_on) and (p in set(train.participant)) == (scheme == "personalised")
                 pred.append(score[ID].assign(scheme=scheme, ablation="full"))
                 for ablation, dropped in ABLATIONS.items():
-                    cols = [c for c in ALLOWED if c not in dropped]
+                    cols = [c for c in INPUTS if c not in dropped]
                     for torque, targets in TARGETS.items():
                         fit = train.dropna(subset=targets)   # a stuck gauge is NaN (preprocess.py)
-                        model = MODELS[name](cols).fit(fit, fit[targets].to_numpy())
+                        model = MODELS[name](cols, len(fit)).fit(fit, fit[targets].to_numpy())
                         t0 = time.perf_counter()
                         yhat = model.predict(score)
                         ms = 1e3 * (time.perf_counter() - t0) / score.stride.nunique()
@@ -163,8 +192,13 @@ if __name__ == "__main__":
         m = metrics(np.array([0.0, 2.0]), np.array([1.0, 3.0]), 4.0)
         assert m == dict(rmse=1.0, mae=1.0, r2=0.0, nrmse=0.25), m
         g = d[d.participant == everyone[0]]
-        full, no_phase = (features(g, [c for c in ALLOWED if c not in ABLATIONS[k]]) for k in ("full", "no_phase"))
+        full, no_phase, no_accel = (features(g, [c for c in INPUTS if c not in ABLATIONS[k]]) for k in ("full", "no_phase", "no_accel"))
         assert full.shape[1] - no_phase.shape[1] == 9, "no_phase must drop phase, its 4 harmonics, stance_alpha and 3 gait states"
+        assert full.shape[1] - no_accel.shape[1] == 5, "no_accel must drop the derivative of the 5 velocities"
+        k = g.iloc[:101]   # one stride: the derivative of its velocity, integrated back, is the velocity
+        acc = features(k, ["hip_qd", "accel"])[:, 1]
+        back = k.hip_qd.iloc[0] + np.r_[0, np.cumsum((acc[1:] + acc[:-1]) / 2 * np.diff(k.t.to_numpy()))]
+        assert np.abs(back - k.hip_qd.to_numpy()).max() < 0.25 * np.ptp(k.hip_qd.to_numpy()), "accel is not the velocity's time derivative"
         y = g[TARGETS["motor"]].to_numpy()
         resid = pd.DataFrame(y - PhaseMean(ALLOWED).fit(g, y).predict(g)).groupby([g[k].to_numpy() for k in PhaseMean(ALLOWED).keys]).mean()
         assert np.abs(resid.to_numpy()).max() < 1e-3, "the phase mean is not the mean of its training rows"
