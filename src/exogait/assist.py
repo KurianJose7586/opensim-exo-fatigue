@@ -239,6 +239,10 @@ def compare(subj="HL03", cond="SM_WALKING", n_mesh=50, ideal=False):
 
 
 if __name__ == "__main__":
+    import os
+    if os.environ.get("EXOGAIT_SCALED"):   # the twin scaled to this participant, into moco_scaled/ (track.scaled)
+        who = [a for a in sys.argv[1:] if len(a) == 4 and a[:2] in ("AB", "HL")]
+        print("scaled twin: length factor %.3f, body mass %.0f kg" % track.scaled(who[0] if who else "HL03"), flush=True)
     if sys.argv[1:2] == ["ai"]:   # assist.py ai [ID] [condition] [model]
         out = replay_ai(*sys.argv[2:5])
         print("\n".join(f"  {k:<28} {v}" for k, v in out.items()))

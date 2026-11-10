@@ -60,6 +60,46 @@ VALUE = {"pelvis_tilt": "/jointset/groundPelvis/pelvis_tilt", "pelvis_tx": "/joi
                                                                     ("ankle", "ankle_angle")) for s in "lr"}}
 EXO = {f"exo_{j}_{s}": f"{c}_{s}" for j, c in (("hip", "hip_flexion"), ("knee", "knee_angle")) for s in "lr"}
 BOUNDS = {"hip_flexion": (-25, 95), "knee_angle": (-120, 10), "ankle_angle": (-30, 30)}   # deg
+SCALE = 1.0          # segment lengths against the generic model's: 1 unless scaled() has run
+GENERIC = (1.80, 62.0)   # the generic 2D_gait: its mass, and the height its segments suggest (hip axis at 0.935 m standing)
+
+
+def scaled(subj):
+    """K6: switch this process to the twin scaled to one participant (Lhoste et al. 2026, Table 2): segment lengths by
+    height / GENERIC height, body mass set to the participant's (mass distribution kept), muscle fibre and tendon
+    lengths with their paths (OpenSim's Model.scale), maximum isometric forces by the mass ratio (muscle volume
+    goes with mass x height, fibre length with height). The X2 is added afterwards, unscaled: 20.7 kg for everyone.
+    Solves then go to results/exogait/moco_scaled/, beside the generic ones.
+    ponytail: one uniform factor from stature. Segment-wise factors need leg lengths, which nobody measured."""
+    global MODEL, MOCO, SCALE
+    with open(x2model.ROOT / "models" / "exogait" / "participants.csv") as f:
+        person = next(r for r in csv.DictReader(f) if r["participant"] == subj)
+    SCALE, mass = float(person["height_m"]) / GENERIC[0], float(person["mass_kg"])
+    MOCO = x2model.OUT / "moco_scaled"
+    MODEL = x2model.OUT / "model" / f"2D_gait_x2_{subj}.osim"
+    if not MODEL.exists():
+        model = osim.Model(str(x2model.BASE))
+        state = model.initSystem()
+        factors = osim.ScaleSet()
+        for i in range(model.getBodySet().getSize()):
+            s = osim.Scale()
+            s.setSegmentName(model.getBodySet().get(i).getName())
+            s.setScaleFactors(osim.Vec3(SCALE))
+            s.setApply(True)
+            factors.cloneAndAppend(s)
+        model.scale(state, factors, True, mass)
+        for c in model.getComponentsList():
+            m = osim.Muscle.safeDownCast(model.updComponent(c.getAbsolutePathString()))
+            if m:
+                m.setMaxIsometricForce(m.getMaxIsometricForce() * mass / GENERIC[1])
+        base = MODEL.with_name(f"2D_gait_{subj}.osim")
+        MODEL.parent.mkdir(parents=True, exist_ok=True)
+        model.printToXML(str(base))
+        x2model.build_model(MODEL, base)
+        check = osim.Model(str(MODEL))
+        got = check.getTotalMass(check.initSystem())
+        assert abs(got - mass - x2model.X2_MASS) < 0.01, f"scaled model weighs {got} kg, not {mass} + {x2model.X2_MASS}"
+    return SCALE, mass
 
 
 def stride_length(m):
@@ -69,7 +109,7 @@ def stride_length(m):
     def ankle_x(s):
         thigh = (m["pelvis_tilt"] + m[f"hip_flexion_{s}"]) * DEG
         return -0.0045 * np.cos(thigh) + 0.3969 * np.sin(thigh) + 0.4157 * np.sin(thigh + m[f"knee_angle_{s}"] * DEG)
-    return float(np.ptp(ankle_x("r") - ankle_x("l")))
+    return SCALE * float(np.ptp(ankle_x("r") - ankle_x("l")))
 
 
 def lowpass(y, T, hz=6.0):
@@ -211,7 +251,7 @@ def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name, prescribed=No
     lo, hi = mean["pelvis_tilt"].min() - 10, mean["pelvis_tilt"].max() + 10
     problem.setStateInfo(f"{VALUE['pelvis_tilt']}/value", [lo * DEG, hi * DEG])
     problem.setStateInfo(f"{VALUE['pelvis_tx']}/value", [-0.2, 1.5 * L], 0, [STRIDE[0] * L, STRIDE[1] * L])
-    problem.setStateInfo(f"{VALUE['pelvis_ty']}/value", [0.75, 1.25])
+    problem.setStateInfo(f"{VALUE['pelvis_ty']}/value", [0.75 * SCALE, 1.25 * SCALE])
     problem.setStateInfo(f"{VALUE['lumbar']}/value", [0, 20 * DEG])
     for c, (a, b) in BOUNDS.items():
         for s in "lr":
@@ -230,6 +270,8 @@ def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name, prescribed=No
         for s in g.getStateNames():
             if s.endswith("/speed"):
                 g.setState(s, np.array(g.getStateMat(s)) / k)
+            if "pelvis_t" in s and "tilt" not in s and SCALE != 1 and Path(guess).resolve() == SEED.resolve():
+                g.setState(s, np.array(g.getStateMat(s)) * SCALE)   # the generic seed's pelvis path, on a scaled body
         g.write("guess.sto")
         solver.setGuessFile("guess.sto")   # as a file: read at solve time, once the problem is final
     else:
@@ -237,8 +279,8 @@ def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name, prescribed=No
         tg = g.getTimeMat()
         g.setState(f"{VALUE['pelvis_tx']}/value", L * tg / T)
         g.setState(f"{VALUE['pelvis_tx']}/speed", np.full(len(tg), L / T))
-        g.setState(f"{VALUE['pelvis_ty']}/value", np.full(len(tg), 0.90))   # straight-leg standing height is 0.935 m
-        assert abs(np.array(solver.getGuess().getStateMat(f"{VALUE['pelvis_ty']}/value"))[0] - 0.90) < 1e-12, "guess not applied"
+        g.setState(f"{VALUE['pelvis_ty']}/value", np.full(len(tg), 0.90 * SCALE))   # straight-leg standing height is 0.935 m
+        assert abs(np.array(solver.getGuess().getStateMat(f"{VALUE['pelvis_ty']}/value"))[0] - 0.90 * SCALE) < 1e-12, "guess not applied"
 
     tic = time.perf_counter()
     sol = study.solve()
@@ -319,7 +361,7 @@ def check(row):
         assert row[f"exo_int2_{a}"] <= 1.02 * row[f"exo_budget_{a}"] + 0.5 or row["case"] in ("measured", "ideal", "ai"), f"{a} over its budget"
     joint = [v for k, v in row.items() if k.startswith("reserve_rms") and "pelvis" not in k]
     assert max(joint) < 5, f"joint reserves up to {max(joint)} Nm RMS"
-    assert max(row["peak_grf_bw_r"], row["peak_grf_bw_l"]) < 2.5 and row["min_pelvis_ty"] > 0.8, "not walking on its feet"
+    assert max(row["peak_grf_bw_r"], row["peak_grf_bw_l"]) < 2.5 and row["min_pelvis_ty"] > 0.8 * SCALE, "not walking on its feet"
 
 
 def plot(subj, cond, n_mesh=50, case="measured"):
@@ -559,6 +601,8 @@ if __name__ == "__main__":
         sys.exit()
     subj = sys.argv[1] if len(sys.argv) > 1 else "HL03"
     cond = sys.argv[2] if len(sys.argv) > 2 else "SM_WALKING"
+    if os.environ.get("EXOGAIT_SCALED"):   # the twin scaled to this participant, into moco_scaled/
+        print("scaled twin: length factor %.3f, body mass %.0f kg" % scaled(subj), flush=True)
     for n_mesh in map(int, (sys.argv[3] if len(sys.argv) > 3 else "50").split(",")):
         guess = SEED if len(sys.argv) < 5 or sys.argv[4] == "seed" else None if sys.argv[4] == "cold" else sys.argv[4]
         row = solve(subj, cond, n_mesh, guess, sys.argv[5] if len(sys.argv) > 5 else "measured")

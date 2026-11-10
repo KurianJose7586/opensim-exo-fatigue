@@ -90,9 +90,9 @@ def _add(parent, tag, name, **props):
         ET.SubElement(e, k).text = " ".join(map(str, v)) if isinstance(v, tuple) else str(v)
 
 
-def build_model(path=OUT / "model" / "2D_gait_x2.osim"):
-    """2D_gait.osim + X2 mass + hip/knee exo actuators, written as .osim."""
-    tree = ET.parse(BASE)
+def build_model(path=OUT / "model" / "2D_gait_x2.osim", base=BASE):
+    """2D_gait.osim (or a scaled copy of it, `base`) + X2 mass + hip/knee exo actuators, written as .osim."""
+    tree = ET.parse(base)
     m = tree.getroot().find("Model")
     for name, parent, kg, com, izz in X2_PARTS:
         # welded at the parent's origin, so the COM is in the parent frame.
