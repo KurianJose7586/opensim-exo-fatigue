@@ -5,7 +5,8 @@
 Reads data/raw/exogait/<ID>_ExoGait-Benchmark.csv by column name (AB72's column order
 differs), never edits it. Prints header facts, timing, rows per condition, sign checks,
 peak knee flexion per stride, and how the torque columns relate. Asserts the sign
-conventions the OpenSim mapping (K4) relies on.
+conventions the OpenSim mapping (K4) relies on, and that JointTorquesViaGauges is the
+joint-output torque (K5 replays it).
 """
 
 import glob
@@ -13,6 +14,7 @@ import sys
 
 import numpy as np
 import pandas as pd
+from scipy.signal import savgol_filter
 
 D = "data/raw/exogait"
 JOINTS = {1: "L hip", 2: "L knee", 3: "R hip", 4: "R knee"}   # ponsLab helpers.py
@@ -84,16 +86,35 @@ def check(subj):
                         sm[f"JointTorques_{i}"], 1)[0] for i in JOINTS]
     print("SM walking, slope of JointTorques on the impedance torque:", dict(zip(JOINTS.values(), np.round(slope, 2))))
 
-    return hs_hip, knee_max, slope
+    # JointTorques is motor-side: JointTorques - gauges = rotor inertia x acceleration + friction, with the
+    # published 1.87 kg m^2 (T-RO Table II). So JointTorquesViaGauges is the joint-output torque K5 replays
+    fits = []
+    for cond in ("transparent_WALKING", "SM_WALKING"):
+        g = d[d.condition == cond]
+        ok = np.r_[True, np.abs(np.diff(g.time.to_numpy()) - 1 / 333) < 1e-3]   # regular samples only
+        for i in JOINTS:
+            qd = savgol_filter(g[f"JointVelocities_{i}"].to_numpy(), 31, 3)       # ~90 ms window
+            qdd = savgol_filter(g[f"JointVelocities_{i}"].to_numpy(), 31, 3, deriv=1, delta=1 / 333)
+            A = np.c_[qdd, np.tanh(qd / 0.05), qd, np.ones(len(qd))][ok]          # inertia, Coulomb, viscous, offset
+            y = savgol_filter((g[f"JointTorques_{i}"] - g[f"JointTorquesViaGauges_{i}"]).to_numpy(), 31, 3)[ok]
+            b = np.linalg.lstsq(A, y, rcond=None)[0]
+            fits.append((b[0], 1 - ((y - A @ b) ** 2).sum() / ((y - y.mean()) ** 2).sum(), b[3]))
+    print("JointTorques - gauges = I qdd + friction, TR then SM x 4 joints: I", np.round([f[0] for f in fits], 2),
+          "kg m^2, R2", np.round([f[1] for f in fits], 2), ", offset", np.round([f[2] for f in fits], 1), "Nm")
+
+    return hs_hip, knee_max, slope, fits
 
 
 if __name__ == "__main__":
     assert not headers(), "EMG columns found -- update notes (J1 Q8)"
     for s in sys.argv[1:] or ["AB68"]:
-        hs_hip, knee_max, slope = check(s)
+        hs_hip, knee_max, slope, fits = check(s)
         # the K4 mapping assumes X2 signs equal OpenSim's: hip + flexion, knee - flexion
         assert min(hs_hip) > 5, f"{s}: hip not flexed at heel strike -- hip sign differs from OpenSim"
         assert max(knee_max) < 5, f"{s}: knee goes positive -- knee sign differs from OpenSim"
-        assert min(slope) > 0.5, f"{s}: JointTorques does not follow the SM impedance -- torque sign differs"
+        # a flipped sign gives about -1; real slopes run 0.4-1.7 (the motor also accelerates its own rotor)
+        assert min(slope) > 0.2, f"{s}: JointTorques does not follow the SM impedance -- torque sign differs"
+        assert all(1.5 < i < 2.6 and r2 > 0.8 for i, r2, _ in fits), f"{s}: JointTorques - gauges is not rotor inertia + friction"
     print("\nOK: no EMG columns; hip + = flexion and knee - = flexion, as in OpenSim; "
-          "+JointTorques drives the angle +, so it is the OpenSim generalized force sign")
+          "+JointTorques drives the angle +, so it is the OpenSim generalized force sign; "
+          "JointTorquesViaGauges is the joint-output torque (JointTorques less rotor inertia and friction)")

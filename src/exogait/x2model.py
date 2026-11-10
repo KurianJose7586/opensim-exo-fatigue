@@ -16,9 +16,10 @@ Model: models/base/2D_gait.osim (generic anthropometry: ExoGait records none) pl
             (8.6 kg) and not used.
     torque  exo_{hip,knee}_{l,r}: CoordinateActuators as twin._add_exo builds them, optimal force
             EXO_F, controls +/-0.8 = +/-80 Nm (T-RO Sec. II-A). No ankle actuator: the X2 has none.
-            +JointTorques is OpenSim's sign (checks.py asserts it), so control = JointTorques / EXO_F.
-    left out  rotor inertia (1.87 kg m^2 per joint, T-RO Table II) and friction (Table III): JointTorques
-            looks motor-side, so K6/K7 subtract 1.87*qddot and friction before comparing or replaying.
+            The X2 torque columns have OpenSim's sign (checks.py asserts it), so control = torque / EXO_F.
+    left out  rotor inertia (1.87 kg m^2 per joint, T-RO Table II) and friction (Table III). They sit
+            between JointTorques (motor side) and JointTorquesViaGauges (joint output; checks.py asserts
+            it), so K5 replays the gauge torque and the model needs neither.
 Ankle, pelvis_tx/ty and lumbar are not recorded; K5's tracking problem leaves them free.
 
 Mapping, deg. Signs already match OpenSim (J2): hip + = flexion, knee - = flexion.
@@ -31,9 +32,9 @@ Mapping, deg. Signs already match OpenSim (J2): hip + = flexion, knee - = flexio
     backpack's absolute level differs by site (AB +3.4, HL -9.6 deg). Replace c with a calibration
     posture or the IMU mounting angle if the authors give one.
 Strides run right heel strike to right heel strike (gait_cycle_right wraps), are cleaned (strides()),
-resampled on time and averaged. The mean's small end-start mismatch is removed by a ramp centred on
-mid-stride, so a periodicity goal is consistent and the mean (hence c) is kept. Time axis = the mean
-stride duration.
+resampled on time and averaged. The measured torques get the same treatment and are returned for
+K5/K6. The mean's small end-start mismatch is removed by a ramp centred on mid-stride, so a
+periodicity goal is consistent and the mean (hence c) is kept. Time axis = the mean stride duration.
 """
 
 import shutil
@@ -75,6 +76,8 @@ COORDS = ["pelvis_tilt", "pelvis_tx", "pelvis_ty", "hip_flexion_l", "hip_flexion
 
 JOINTS = {"hip_flexion_l": "JointPositions_1", "knee_angle_l": "JointPositions_2",
           "hip_flexion_r": "JointPositions_3", "knee_angle_r": "JointPositions_4"}
+# gauges = the torque at the joint output; motor = that plus rotor inertia and friction (K6, notes "K6")
+TORQUES = {"gauge": "JointTorquesViaGauges", "motor": "JointTorques"}
 WALKING = ("transparent_WALKING", "SM_WALKING")
 P = np.linspace(0, 1, 101)   # 1% of the stride
 
@@ -125,13 +128,15 @@ def reference():
 def strides(d, cond):
     """Clean right-heel-strike-to-right-heel-strike strides of one condition.
 
-    Returns stride times (n,) [s], {coordinate or "bp": (n, 101) deg, resampled on time}, a mask of the
+    Returns stride times (n,) [s], {coordinate or "bp": (n, 101) deg, "gauge_<coord>" and
+    "motor_<coord>": (n, 101) Nm, all resampled on time}, a mask of the
     strides whose BackPackAngle the gyro confirms, and how many strides each filter rejects (they
     overlap). Filters: K4 stride-extraction and hip-pelvis-frame work. The gyro filter only touches
     what is built from BackPackAngle: a backpack artefact says nothing about the joint encoders.
     """
     t, lab = d.time.to_numpy(), (d.condition == cond).to_numpy()
     q = {k: np.degrees(d[c].to_numpy()) for k, c in JOINTS.items()} | {"bp": np.degrees(d.BackPackAngle.to_numpy())}
+    q |= {f"{p}_{k}": d[c.replace("JointPositions", col)].to_numpy() for k, c in JOINTS.items() for p, col in TORQUES.items()}
     gyro = np.degrees(d.BackPackAngularVelocity.to_numpy())
     state, done = d.gait_state_right.to_numpy(), d.step_complete_r.to_numpy() == True
     hs = np.flatnonzero(np.diff(d.gait_cycle_right.to_numpy()) < -50) + 1   # integer phase wraps 99 -> 0
@@ -178,7 +183,8 @@ def map_x2(subj="AB68", cond="transparent_WALKING"):
     """One participant x condition -> the mean stride as a MocoTrack states reference (.sto)."""
     d = pd.read_csv(ROOT / "data" / "raw" / "exogait" / f"{subj}_ExoGait-Benchmark.csv",
                     usecols=["time", "condition", "BackPackAngle", "BackPackAngularVelocity", "gait_cycle_left",
-                             "gait_cycle_right", "gait_state_right", "step_complete_r", *JOINTS.values()])
+                             "gait_cycle_right", "gait_state_right", "step_complete_r", *JOINTS.values(),
+                             *(c.replace("JointPositions", col) for c in JOINTS.values() for col in TORQUES.values())])
     st = {c: strides(d, c) for c in {cond, *WALKING}}
     ref, path = reference()
     c = ref["pelvis_tilt"].mean() - np.mean([st[w][1]["bp"][st[w][2]].mean() - 90 for w in WALKING])
@@ -187,7 +193,9 @@ def map_x2(subj="AB68", cond="transparent_WALKING"):
     x2 = {"pelvis_tilt": cur["bp"][bp_ok] - 90 + c,
           "hip_flexion_l": cur["hip_flexion_l"] - c, "hip_flexion_r": cur["hip_flexion_r"] - c,
           "knee_angle_l": cur["knee_angle_l"], "knee_angle_r": cur["knee_angle_r"]}
-    mean = {k: v.mean(0) - (P - 0.5) * (v.mean(0)[-1] - v.mean(0)[0]) for k, v in x2.items()}
+    periodic = lambda m: m - (P - 0.5) * (m[-1] - m[0])   # end = start, mean kept
+    mean = {k: periodic(v.mean(0)) for k, v in x2.items()}
+    tau = {k: periodic(v.mean(0)) for k, v in cur.items() if k.split("_")[0] in TORQUES}   # Nm, for K5/K6
     df = pd.DataFrame({"time": P * T.mean(), **{path[k]: np.radians(v) for k, v in mean.items()}})
     sto = OUT / "coords" / f"{subj}_{cond}_mean.sto"
     sto.parent.mkdir(parents=True, exist_ok=True)
@@ -195,7 +203,7 @@ def map_x2(subj="AB68", cond="transparent_WALKING"):
         f.write(f"version=1\nnRows={len(df)}\nnColumns={df.shape[1]}\ninDegrees=no\n"
                 f"x2_hip_offset_deg={c:.3f}\nstrides={len(T)}\npelvis_tilt_strides={bp_ok.sum()}\nendheader\n")
         df.to_csv(f, sep="\t", index=False, float_format="%.8f")
-    return dict(sto=sto, mean=mean, sd={k: v.std(0, ddof=1) for k, v in x2.items()}, ref=ref, T=T, c=c, bp_ok=bp_ok,
+    return dict(sto=sto, mean=mean, tau=tau, sd={k: v.std(0, ddof=1) for k, v in x2.items()}, ref=ref, T=T, c=c, bp_ok=bp_ok,
                 rejected=rejected, end_start={k: v.mean(0)[-1] - v.mean(0)[0] for k, v in x2.items()},
                 raw_mean={k: v.mean() for k, v in x2.items()})
 

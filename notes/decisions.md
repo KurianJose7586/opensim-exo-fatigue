@@ -356,3 +356,71 @@ X2 hip − c, with knee unchanged. Their sum, the thigh angle, does not depend o
 The tracking target is the **mean of clean strides**, made periodic with its mean kept, not one
 stride: single strides are 3.8–4.6° RMS from the mean and their end-start mismatch is 1.4–5.5°.
 K5 starts there for cost and settings, then moves to single strides for K7's per-stride cases.
+
+### 2026-11-10: the exo torque in OpenSim is `JointTorquesViaGauges`, not `JointTorques`
+
+`JointTorques` is the motor-side torque. `JointTorquesViaGauges` is the torque at the joint
+output, which is what the links and the leg feel. Evidence, all 19 participants, TR and SM
+walking, 4 joints (`checks.py` asserts it):
+
+- `JointTorques` − gauges = I·q̈ + Coulomb + viscous friction + a constant, with R² 0.82–0.98
+  (median 0.93).
+- The fitted I is 1.78–2.29 kg m² (median 2.06). The published X2 rotor inertia is 1.87 kg m²
+  (T-RO Table II).
+- That rotor-and-friction part is about 23 Nm RMS, as large as the torque itself. This is why
+  the two columns looked uncorrelated in J2.
+
+So K5, K6 and K7 replay the mean gauge torque on the model's exo actuators. The model then
+needs no rotor or friction model, since both sit on the motor side of the gauge.
+
+- **Caveat:** the constant is not zero: hip −3.5 Nm (median; −6.9 to +2.6), knee +1.7 Nm
+  (−1.8 to +13.6). It is either a gauge offset or direction-dependent friction, and the data
+  cannot tell which. It is left in the replayed torque.
+- **For J1 Q9 (the prediction target):** the two columns answer different questions.
+  `JointTorques` is what the controller commanded the motor to do, and about half of it moves
+  the motor's own rotor. The gauge torque is what reached the wearer. Q9's text now says so.
+
+### 2026-11-10: K5 settings: tracking weight 10, loose ankle prior, speed not imposed, warm start
+
+Tested on HL03 SM walking, mean stride, 50 mesh intervals (`notes/observations.md`, "K5"):
+
+- **Tracking weight 10 against effort 1.** At 1 (the K4 trial's ratio) the knee ran 4° too
+  straight through stance and the hip 3–5° short of extension: 2.5–3.8° RMSE. At 10 it is
+  0.6–1.2°.
+- **The stock walk's ankle at weight 0.01** (against effort; the J1 Q7 default). With the ankle
+  fully free it fluttered ±10° in swing.
+- **Speed is not imposed.** The first version forced the pelvis to advance by a stride length
+  estimated from the tracked angles; the estimate was 15% long and the solve sat on its bound.
+  Now the pelvis only has to move forward, and the stride length is the model's own. It then
+  matches the data-based estimates (K4's stride analysis), which makes it a check, not an input.
+- **Every solve starts from a stored converged stride** (`models/exogait/seed_stride.sto`, HL03
+  SM). From the tracked states alone IPOPT converged once in five tries; from the seed it
+  converged for every participant and controller. The seed came from that one cold run
+  (tracking weight 1, no ankle prior), re-solved with the final settings.
+- **Mesh:** 50 intervals per stride. At 100 the hip and knee RMSE change by under 0.05°, but
+  the effort integral is 9% lower and the heel-strike force peaks are higher, so effort is
+  compared only between solves on the same mesh.
+- **Rejected:** OpenSim's `TabOpLowPassFilter` on the reference, in favour of a periodic 6 Hz
+  low-pass (the same one the replayed torque gets; the curves stay periodic); and a per-solve
+  rewrite of the model file (parallel solves collided on it).
+- **Worked around:** `apply_tracked_states_to_guess` is off whenever a guess is given. MocoTrack
+  resamples the tracked states onto the guess grid, and for some stride durations its own last
+  time lands one floating-point digit short of the final time, which `resample()` rejects.
+
+### 2026-11-10: K7's `optimised` case is the free optimum scaled to the measured budget
+
+The plan gave `optimised` the measured torque's budget (per actuator, the integral of squared
+torque) as a Moco endpoint constraint. Moco 4.6 cannot do that: `MocoControlGoal` has no
+constraint mode, and `MocoOutputGoal` on the actuator's `actuation` output fails with a stale
+cache error at Stage Velocity.
+
+So there are two solves instead of one:
+
+- **`ideal`:** Moco chooses the exo torque freely within ±80 Nm. It beats `measured` by
+  construction, so it is reported only as an upper bound (as J1 Q5 already said).
+- **`optimised`:** the `ideal` torque, scaled down per actuator until its integral of squared
+  torque equals the measured one, then replayed. This is the H4 test.
+
+It is conservative: the true optimum under the budget is at least as good as a scaled copy of
+the unconstrained one. If `optimised` beats `measured`, H4 holds for that stride. If it does
+not, that stride is inconclusive, not a failure of H4.
