@@ -103,7 +103,7 @@ def ground_forces(model, sol):
     return np.array(grf.getIndependentColumn()), {s: grf.getDependentColumn(f"ground_force_{s}_vy").to_numpy() for s in "rl"}
 
 
-def solve(subj="HL03", cond="SM_WALKING", n_mesh=50, guess=SEED, case="measured", exo_w=None, max_iter=3000):
+def solve(subj="HL03", cond="SM_WALKING", n_mesh=50, guess=SEED, case="measured", exo_w=None, max_iter=3000, prescribed=None):
     """One solve. Returns the summary row (dict); the solution is written to MOCO.
     guess: a solved .sto of the same model (any stride) to start from, stretched onto this stride.
            None starts from the tracked states: how the seed was first made, but it usually wanders.
@@ -115,19 +115,21 @@ def solve(subj="HL03", cond="SM_WALKING", n_mesh=50, guess=SEED, case="measured"
                           in the effort goal. assist.py sets those prices so that each actuator spends the
                           measured torque's budget (the integral of its square): the optimum under that budget.
                           Moco 4.6 cannot constrain the integral itself (MocoControlGoal has no constraint mode,
-                          and MocoOutputGoal on |actuation hits a stale-cache error)."""
+                          and MocoOutputGoal on |actuation hits a stale-cache error).
+               ai         the exo replays `prescribed`, {actuator: Nm on x2model.P}: K3's predicted torque
+                          (assist.ai_torque). Replayed exactly, like `measured`, and not held to the budget."""
     name = f"{subj}_{cond}_mean_{case}_m{n_mesh}"
     cwd, work = os.getcwd(), MOCO / "work" / name
     work.mkdir(parents=True, exist_ok=True)
     guess = guess and str(Path(guess).resolve())
     os.chdir(work)   # MocoTrack and the solver write <name>_tracked_states.sto and a stop file into the cwd
     try:
-        return _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name)
+        return _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name, prescribed)
     finally:
         os.chdir(cwd)
 
 
-def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name):
+def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name, prescribed=None):
     MODEL.exists() or x2model.build_model(MODEL)
     r = x2model.map_x2(subj, cond)
     mean, P = r["mean"], x2model.P
@@ -180,7 +182,10 @@ def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name):
     stuck = [a for a, v in measured.items() if np.ptp(v) < 1.0]   # AB82's left-knee gauge reads -12.07 Nm throughout SM
     assert not stuck or case == "none", f"{subj} {cond}: the gauge torque at {stuck} is constant: a stuck channel, nothing to replay"
     budget = {a: float(np.trapezoid(v ** 2, P * T)) for a, v in measured.items()}   # Nm^2 s
-    tau = {"measured": measured, "none": {a: 0 * v for a, v in measured.items()}, "ideal": {}, "optimised": {}}[case]
+    tau = {"measured": measured, "none": {a: 0 * v for a, v in measured.items()}, "ideal": {}, "optimised": {},
+           "ai": {a: lowpass(v, T) for a, v in (prescribed or {}).items()}}[case]
+    assert case != "ai" or (set(tau) == set(EXO) and max(np.abs(v).max() for v in tau.values()) < x2model.X2_TORQUE), \
+        "`ai` needs a torque for each of the four actuators, within the X2 limit"
     for a, v in tau.items():
         f = osim.PiecewiseLinearFunction()
         for ti, ui in zip(P * T, v / x2model.EXO_F):
@@ -311,7 +316,7 @@ def check(row):
     assert 0.55 * row["stride_len_fk"] < row["stride_len"] < 1.25 * row["stride_len_fk"], "stride length on its bound"
     assert all(v < 1 for k, v in row.items() if k.startswith("replay_rmse") and v != ""), "exo torque is not the prescribed torque"
     for a in EXO:   # the mesh's quadrature and the 101-point budget differ by a hair
-        assert row[f"exo_int2_{a}"] <= 1.02 * row[f"exo_budget_{a}"] + 0.5 or row["case"] in ("measured", "ideal"), f"{a} over its budget"
+        assert row[f"exo_int2_{a}"] <= 1.02 * row[f"exo_budget_{a}"] + 0.5 or row["case"] in ("measured", "ideal", "ai"), f"{a} over its budget"
     joint = [v for k, v in row.items() if k.startswith("reserve_rms") and "pelvis" not in k]
     assert max(joint) < 5, f"joint reserves up to {max(joint)} Nm RMS"
     assert max(row["peak_grf_bw_r"], row["peak_grf_bw_l"]) < 2.5 and row["min_pelvis_ty"] > 0.8, "not walking on its feet"

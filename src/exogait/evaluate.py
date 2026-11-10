@@ -59,7 +59,7 @@ from sklearn.linear_model import Ridge
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import FunctionTransformer, StandardScaler
 
-from preprocess import CONTROLLERS, MODES, OUT, ROOT, read_strides
+from preprocess import CONTROLLERS, MODES, OUT, ROOT, read_strides, write
 from split import ALLOWED, TARGETS
 
 RESULTS = ROOT / "results" / "exogait" / "predict"
@@ -186,7 +186,7 @@ def evaluate(d, ids, models, test=False, out=RESULTS):
                                                      n_strides=int(ok.sum()) // 101, n_train_strides=len(fit) // 101,
                                                      epochs=getattr(model, "epochs", np.nan), **stamp))
             if test:
-                pd.concat(pred).to_csv(out / f"{name}_{p}_pred.csv", index=False, float_format="%.6g")
+                write(pd.concat(pred), out / f"{name}_{p}_pred.csv")   # the clock to the microsecond
             new = pd.DataFrame(rows)   # written after every participant: a run that dies keeps what it finished
             if f.exists():
                 new = pd.concat([pd.read_csv(f), new]).drop_duplicates(RESULT_KEY, keep="last")
