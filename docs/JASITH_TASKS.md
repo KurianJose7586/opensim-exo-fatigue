@@ -60,8 +60,8 @@ Jasith takes work that runs on one or two participants or on already-processed d
 | J4 | Splits and leakage audit | J2, J3 | M | **done** by Kurian, 2026-11-10. Jasith reviews |
 | J5 | Baselines and shared metrics (RO2) | J3, J4; K2 for the full run | M | **done** by Kurian, 2026-11-10, scored on val. The `--test` pass waits for K3 |
 | J6 | EMG features (RO5) | J3 | M | **blocked**: no EMG (Q8). Closes as not possible if none by 2026-12-01 |
-| J7 | Statistics and figures (H1–H4, RO6) | J5, K3, K9 | M | todo |
-| J8 | Realign the docs and remove MATLAB | J1 (only for the title) | M | todo: the MATLAB part can go now |
+| J7 | Statistics and figures (H1–H4, RO6) | J5, K3, K9 | M | **code done** by Kurian (`stats.py`); final numbers follow the test pass. RO6 cost tables wait for K9 |
+| J8 | Realign the docs and remove MATLAB | J1 (only for the title) | M | **done** by Kurian, 2026-11-11: README, PROJECT_GUIDE and ONBOARDING rewritten; the old guide archived. The title is unchanged, with a footnote |
 | J9 | Literature and write-up | J5, J7 | L | todo |
 
 Sizes: S = a day or two, M = about a week, L = more than a week.
