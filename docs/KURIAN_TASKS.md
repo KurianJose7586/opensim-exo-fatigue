@@ -72,7 +72,7 @@ One flat package, `src/exogait/`. One file per job, each with an assert-based se
 | `evaluate.py` | J5, K3, K9 | scikit-learn | `metrics()`, results writer, H1–H3 ablation loop. Phase mean and ridge by default; forests, GPR and the LSTM with `--models` |
 | `lstm.py` | K3 | torch | LSTM/GRU with `fit`/`predict`, so `evaluate.py` runs it like the sklearn models |
 | `x2model.py` | K4 | opensim | `2D_gait.osim` + X2 masses and hip/knee actuators; X2 → OpenSim coordinates |
-| `track.py` | K5, K6 | opensim | MocoTrack per stride, the exo torque prescribed or chosen (`case`); `params.csv`; joint moments vs X2 torque |
+| `track.py` | K5, K6 | opensim | MocoTrack per stride, the exo torque prescribed or chosen (`case`); `params.csv`; joint moments vs X2 torque; the load split against the footplates |
 | `assist.py` | K7, K8, K9 | opensim | Compares the cases (`none`, `measured`, `optimised`, `ideal`; later `ai`, `emg`), prices the torque budget; the at-scale loop |
 | `animate.py` | K7 | opensim, matplotlib | A solved stride as a film: the model walking, muscles coloured by activation, the exo torque at hip and knee, one panel per case |
 | `emg.py` | J6 | scipy.signal | EMG envelopes per stride (when EMG arrives) |
@@ -341,9 +341,11 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
   2026, Table 2; `models/exogait/participants.csv`, 47–90 kg against the model's 62 kg), so K5–K7
   can be solved again on scaled bodies: about a night (`notes/decisions.md`, 2026-11-10). A fitted
   calibration stays out of scope.
-- **Also left, and new:** check the model's left-right split of the vertical ground force
-  against `StanceInterpolationFactor`, which the paper says is exactly that, measured by the
-  footplates. The tracking never sees it, so it is a held-out test of the twin.
+- **A held-out check, done:** `track.py load` compares the model's left-right split of the
+  vertical ground force with `StanceInterpolationFactor`, which is that split as the footplates
+  measure it. The tracking never sees it. On the 34 valid walking solves r = 0.90 (median;
+  0.70–0.97): single support is right, the hand-over between the feet bounces
+  (`notes/observations.md`, "K6: a held-out check"; `figures/k6_load_split.png`).
 
 ### K7 — AI + Moco integration (RO4, H4) · in progress: `ai` waits for K3
 
@@ -455,6 +457,7 @@ Processed data goes in `data/processed/exogait/` (gitignored, shared as a zip). 
 | `moco/<ID>_<condition>_mean_<case>_m<mesh>.sto` | K5, K7, K8 | — | MocoTrajectory of a mean stride. Single strides later: `<ID>_<stride>_<case>` |
 | `moco/summary.csv` | K5, K7, K8 | solve | see below |
 | `moco/moment_vs_torque.csv` | K6 | participant × condition × joint | RMS of the net joint moment, the muscles' moment, the gauge and the motor torque; the exo's share of the net moment and its correlation with it |
+| `moco/load_split.csv` | K6 | participant × condition | `r, rmse` between the model's and the measured right-foot share of the vertical force, `stride_sd` (the measured share's stride-to-stride SD), both shares at heel strike |
 | `moco/assist.csv` | K7 | participant × condition | effort per case, the changes in %, worst hip/knee RMSE and objective per case, torque rate per actuator, budget used, prices |
 | `params.csv` | K6 | participant | `participant, site, sex, age_y, height_m, mass_kg` (measured: `models/exogait/participants.csv`), `model_mass_kg` (62, generic until the model is scaled), `x2_mass_kg, anthropometry, hip_offset_c_deg`, and per controller: stride counts, stride time, kinematic stride length and speed |
 | `<ID>_emg.csv` | J6 | stride × phase point | `participant, stride, phase`, one column per muscle (normalised envelope) |

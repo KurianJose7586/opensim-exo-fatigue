@@ -733,8 +733,10 @@ releases those recordings: the ExoGait data.)
   leans on, and of how slow this walking is.
 - **AB and HL are the two sites** (J1 Q12): "AB" was recorded in the U.S.A., "HL" in Spain. Not
   clinical groups.
-- **`StanceInterpolationFactor` is a measurement of load** (J1 Q11): the left foot's share of
+- **`StanceInterpolationFactor` is a measurement of load** (J1 Q11): one foot's share of
   the vertical ground reaction force, from 32 force-sensitive resistors in the two footplates.
+  (The paper's text reads as the left foot's. In the data it is the right foot's: 1 in right
+  single support.)
   The controller computes it online at 333 Hz, and switches gait state on a hip-angle
   threshold and on this factor (threshold 0.2). So `stance_alpha` and `gait_state` are
   online signals, not offline like `gait_cycle`. Two consequences:
@@ -742,7 +744,8 @@ releases those recordings: the ExoGait data.)
   - **ExoGait does carry ground-reaction information after all**: not forces, but the
     left-right split of the vertical force through the stride. K5's solutions predict that
     split from the contact model, so it can be checked against the measurement. Nothing in the
-    tracking uses it, which makes it a held-out test of the twin. Not done yet.
+    tracking uses it, which makes it a held-out test of the twin. Done: "K6: a held-out check"
+    below.
 - **Heel strikes** come from the footplate sensors, and `gait_cycle` is interpolated between
   them, as assumed (offline).
 - **SM parameter units** (J1 Q3): stiffness in Nm/rad, damping in Nm·s/rad. Starting values per
@@ -805,6 +808,35 @@ All numbers here are on the **validation blocks**, all 19 participants. The test
     two legs' angles and velocities, the gait state and the load split: it can read them off.
   - Cost: the random forest's val run took 22 minutes, bagged trees 71 (8 threads). Inference
     0.6–0.7 ms per stride, against 0.06 for ridge.
+
+### K6: a held-out check of the twin: the load split between the feet (`track.py load`, 2026-11-11)
+
+ExoGait has no ground reaction forces, but `StanceInterpolationFactor` is one foot's share of
+the vertical force, measured by the footplates (J1b). In the data it is the **right** foot's
+share: 1 in right single support, 0 in left. The tracking never sees it, so it tests what the
+twin had to make up: its contact forces.
+
+- **Method.** For each `measured` walking solve that passes K5's checks (34: SM 16, TR 18), the
+  model's share is right / (right + left) vertical contact force along the solved stride. The
+  measured one is the mean of `stance_alpha` over the participant's kept right strides of that
+  condition. Both on 101 points, compared by correlation and RMSE.
+- **Result.** r = 0.90 (median; quartiles 0.86–0.92; range 0.70–0.97). RMSE 0.19 of the share
+  (0.12–0.29), where the measured share itself varies by 0.09 from stride to stride. SM and TR
+  alike (r 0.90 and 0.91). Lowest: AB75 SM (0.70), the slowest walker, and AB73 SM (0.78).
+- **Where it is right:** both single-support phases, and when each begins and ends. The model
+  walks at its own speed and puts its feet down at its own instants, and they agree with the
+  footplates (`figures/k6_load_split.png`).
+- **Where it is wrong: the hand-over.** In the data the load moves smoothly from one foot to the
+  other over about a third of the stride. In the model the incoming foot takes half the load
+  at once when it lands, gives most of it back, and only then takes over: a bounce at about
+  45–50% of the stride, and a smaller one just before the right heel strike. At the right heel
+  strike itself the footplates already read 0.35, the model 0.02 in SM (0.36 in TR).
+  - This is the contact model (four stiff spheres under rigid feet with a welded toe joint), not
+    the tracking. It is the first measured evidence of what the twin's ground forces get wrong,
+    and it bears on effort: a bounce is paid for by muscles.
+  - It also says the measured share could be tracked (a `MocoContactTrackingGoal`-like term on
+    the split), which would constrain the one thing the solve is free to invent. Not done.
+- `results/exogait/moco/load_split.csv` has a row per solve.
 
 ---
 

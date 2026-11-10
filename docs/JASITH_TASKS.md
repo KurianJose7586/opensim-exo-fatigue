@@ -366,7 +366,7 @@ The plan as it was written:
     *Default: OpenSim on walking, plus ramps on a tilted floor. Stairs stay in the AI models (J5,
     K3), which need no musculoskeletal model.*
 11. **Gait state and stance factor.** **Answered by the paper: online.** The stance factor is
-    the left foot's share of the vertical force on the footplate sensors, and the state machine
+    one foot's share of the vertical force on the footplate sensors, and the state machine
     switches on it. No longer a question for the mentor. As asked: are `gait_state_*` and
     `StanceInterpolationFactor`
     computed online by the X2's state machine, or after the fact like `gait_cycle`?

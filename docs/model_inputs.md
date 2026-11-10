@@ -31,7 +31,7 @@ time.**
 | `condition_encoded` | — | not carried | The same label as a number |
 | `gait_cycle_left/right` | `phase` (0–100) | **allowed, offline** | Phase is interpolated between heel strikes, so it needs the *next* one (J1 Q4). H2 measures it as information, not as a deployable estimate. Its heel strikes also define the strides |
 | `gait_state_left/right` | `gait_state` (stride leg) | **allowed** | Computed online by the X2's state machine (Lhoste et al. 2026). It encodes phase, so H2's no-phase arm drops it. The other leg's is not carried |
-| `StanceInterpolationFactor` | `stance_alpha` | **allowed** | The left foot's share of the vertical ground force, from the footplate sensors, computed online (Lhoste et al. 2026). It encodes phase, so the no-phase arm drops it |
+| `StanceInterpolationFactor` | `stance_alpha` | **allowed** | One foot's share of the vertical ground force (in the data the right foot's: 1 in right single support), from the footplate sensors, computed online (Lhoste et al. 2026). It encodes phase, so the no-phase arm drops it |
 | `SmoothedStanceInterpolationFactor` | — | not carried | The same signal, smoothed |
 | `step_complete_l/r` | — | used, not carried | Drops the strides the dataset marks incomplete. True on every kept stride |
 | `step_number_l/r` | — | **banned**, not carried | A session step counter: it encodes time order |

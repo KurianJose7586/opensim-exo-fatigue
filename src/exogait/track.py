@@ -466,11 +466,16 @@ def load_split(subj, cond, n_mesh=50, case="measured"):
 
 
 def load_splits(n_mesh=50):
-    """K6: load_split() for every `measured` walking solve -> moco/load_split.csv and figures/k6_load_split.png."""
+    """K6: load_split() for every `measured` walking solve that passes K5's checks -> moco/load_split.csv and
+    figures/k6_load_split.png."""
     import matplotlib.pyplot as plt
     rows, curves = [], {c: [] for c in x2model.WALKING}
-    for f in sorted(MOCO.glob(f"*_WALKING_mean_measured_m{n_mesh}.sto")):
-        subj, cond = f.name[:4], f.name[5:].split("_mean_")[0]
+    with open(MOCO / "summary.csv") as f:   # the last row per solve says whether it passed K5's checks
+        verdict = {(r["participant"], r["condition"]): r["check"] for r in csv.DictReader(f)
+                   if r["case"] == "measured" and int(r["n_mesh"]) == n_mesh}
+    for (subj, cond), check in sorted(verdict.items()):
+        if check != "ok" or cond not in x2model.WALKING:
+            continue
         m, sd, share = load_split(subj, cond, n_mesh)
         rows.append(dict(participant=subj, condition=cond, r=round(float(np.corrcoef(m, share)[0, 1]), 3),
                          rmse=round(float(np.sqrt(np.mean((m - share) ** 2))), 3), stride_sd=round(float(sd.mean()), 3),
@@ -492,9 +497,9 @@ def load_splits(n_mesh=50):
         ax.set_xlabel("% of the stride, from right heel strike")
         ax.grid(alpha=0.25)
     axs[0].set_ylabel("right foot's share of the vertical ground force")
-    axs[0].legend(frameon=False, fontsize=9, loc="lower left")
+    fig.legend(*axs[0].get_legend_handles_labels(), loc="lower center", ncol=2, frameon=False, fontsize=9)
     fig.suptitle("A held-out check of the twin: the load split between the feet. The tracking never sees the footplate signal", fontsize=11, x=0.01, ha="left")
-    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    fig.tight_layout(rect=(0, 0.07, 1, 0.94), w_pad=1.5)
     png = x2model.ROOT / "figures" / "k6_load_split.png"
     fig.savefig(png, dpi=130)
     plt.close(fig)
