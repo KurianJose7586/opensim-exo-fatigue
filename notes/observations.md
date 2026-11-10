@@ -882,8 +882,9 @@ choices and the primary endpoints were fixed on the validation blocks first. Tab
 - **Acceleration (exploratory):** lower with it in 19 of 19 for every model that can use it, on
   both torques. Motor torque, walking, personalised: ridge 9.2 vs 16.0 Nm, random forest 6.1 vs
   9.9, LSTM 4.9 vs 5.3. The LSTM needs it least: it sees the velocity sequence.
-- **Validation flattered nothing:** test errors are at or below the validation ones (the final
-  models are fitted on two thirds of the data, not one).
+- **Validation flattered nothing:** test errors are below the validation ones for the forests
+  and the LSTM (the final models are fitted on two thirds of the data, not one) and within 0.1 Nm
+  of them for ridge.
 - **Cost.** Inference per stride: 0.04 ms (phase mean), 0.07 (ridge), 0.3 (LSTM, GPU), 0.5–0.6
   (forests). The test pass took 2 h 10 min for the per-row models (8 threads) and about 1 h 20 min
   for the LSTM.
