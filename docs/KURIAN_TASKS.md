@@ -74,6 +74,7 @@ One flat package, `src/exogait/`. One file per job, each with an assert-based se
 | `x2model.py` | K4 | opensim | `2D_gait.osim` + X2 masses and hip/knee actuators; X2 → OpenSim coordinates |
 | `track.py` | K5, K6 | opensim | MocoTrack per stride, the exo torque prescribed or chosen (`case`); `params.csv`; joint moments vs X2 torque |
 | `assist.py` | K7, K8, K9 | opensim | Compares the cases (`none`, `measured`, `optimised`, `ideal`; later `ai`, `emg`), prices the torque budget; the at-scale loop |
+| `animate.py` | K7 | opensim, matplotlib | A solved stride as a film: the model walking, muscles coloured by activation, the exo torque at hip and knee, one panel per case |
 | `emg.py` | J6 | scipy.signal | EMG envelopes per stride (when EMG arrives) |
 | `stats.py` | J7 | scipy.stats, matplotlib | Paired tests, effect sizes, figures |
 
@@ -371,6 +372,9 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
 - **TR:** reported separately. In TR the delivered torque mostly carries the device (K6).
 - **Out:** a `.sto` and a `summary.csv` row per solve; a row per participant × condition in
   `results/exogait/moco/assist.csv`; `results/exogait/plots/k7_<id>_<condition>_assist.png`.
+- **Film:** `python src/exogait/animate.py [ID] [condition] [cases]` draws the solved stride of
+  each case side by side (`figures/k7_<id>_<condition>_stride.mp4`, `.gif`, `.png`; about
+  4 minutes). HL03's is committed.
 - **Done when:** **done on mean strides:** the effort change of `optimised` vs `measured` and vs
   `none` is shown, with the tracking bound, the X2 limits and the budget satisfied and smoothness
   reported per joint (numbers in `notes/observations.md`, "K7"). **Left:** the `ai` case (K3),

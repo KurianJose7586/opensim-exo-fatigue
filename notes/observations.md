@@ -697,6 +697,20 @@ Kurian took J3–J5 over (`decisions.md`, 2026-11-10). All numbers below are fro
   - Ridge's alpha does not matter: val RMSE is the same to 0.1% for 0.01–100.
   - Inference: 0.04–0.06 ms per stride.
 
+### A film of the solved stride (`src/exogait/animate.py`, 2026-11-10)
+
+- `figures/k7_hl03_sm_walking_stride.mp4` (three strides), `.gif` (one, looping) and `.png`:
+  HL03's mean SM stride with the exo off, the measured torque and the optimised torque, side by
+  side in real time. Muscle paths are coloured by activation; an orange wedge at each hip and knee
+  motor shows the exo torque; the right hip and knee torque run underneath with a cursor.
+- It draws the solutions as they are: the 103 nodes of each `.sto`, nothing smoothed. Effort is
+  recomputed from each solution: 0.636, 0.516 (−19%) and 0.350 (−45%) for HL03.
+- Two things the film shows that the tables do not. HL03 walks at 0.29 m/s, so the pelvis nearly
+  stops once per stride (its slowest forward speed is 0.00–0.01 m/s). And the contact spheres
+  sink 2.6 cm into the floor at most: the contact model's give, the same in all three cases.
+- The drawn foot is rigid (the model's toe joint is welded), so its tip dips under the floor
+  line at toe-off. The contact spheres do not.
+
 ---
 
 ## Open questions
