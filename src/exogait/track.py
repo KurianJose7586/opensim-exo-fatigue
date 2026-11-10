@@ -450,10 +450,13 @@ def moment_vs_torque(subj, n_mesh=50):
 def params():
     """K6: results/exogait/params.csv, one row per participant: what the twin uses for them."""
     rows = []
+    with open(x2model.ROOT / "models" / "exogait" / "participants.csv") as f:   # Lhoste et al. 2026 (JNER 23:114), Table 2
+        people = {r["participant"]: r for r in csv.DictReader(f)}
     for f in sorted((x2model.ROOT / "data" / "raw" / "exogait").glob("*_ExoGait-Benchmark.csv")):
         subj = f.name[:4]
-        row = dict(participant=subj, site=subj[:2], body_mass_kg=62.0, x2_mass_kg=x2model.X2_MASS,
-                   anthropometry="generic 2D_gait (ExoGait records none; J1b pending)")
+        row = dict(participant=subj, site=subj[:2], **{k: people[subj][k] for k in ("sex", "age_y", "height_m", "mass_kg")},
+                   model_mass_kg=62.0, x2_mass_kg=x2model.X2_MASS,
+                   anthropometry="measured: Lhoste 2026 Table 2. The model is still the generic 2D_gait, not scaled")
         for cond in x2model.WALKING:
             r, k = x2model.map_x2(subj, cond), cond.split("_")[0][:2].upper()
             L = stride_length(r["mean"])

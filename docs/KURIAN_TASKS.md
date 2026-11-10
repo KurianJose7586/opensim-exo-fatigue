@@ -99,7 +99,7 @@ with `src/fatigue` on `sys.path`).
 | K3 | Nonlinear torque models (RO2, H1–H3) | K2, J4, J5 | L | todo: next |
 | K4 | OpenSim model and X2 mapping (RO3) | K1, J2 | L | **in progress**: model, mapping and torque sign done; Jasith's plot check left |
 | K5 | MocoTrack: reproduce the gait | K4 | L | **walking done** on mean strides, all 19 × SM/TR. Single strides (need J3) and ramps left |
-| K6 | Personalised twin state (Layer 4) | K5; J1b (soft: generic anthropometry is the default) | M | **done** on mean walking strides. Mass and height wait for J1b |
+| K6 | Personalised twin state (Layer 4) | K5; J1b (soft: generic anthropometry is the default) | M | **done** on mean walking strides, on a generic body. Mass and height are published (J1b): scaling the model is next |
 | K7 | AI + Moco integration (RO4, H4) | K3, K5, K6, J1 Q5 | L | **in progress**: `none`, `measured`, `optimised` done on mean SM strides (16 participants). `ai` waits for K3 |
 | K8 | Assist-as-needed controller with EMG (Layer 6, H5) | K7, J6 | L | **blocked**: no EMG (J1 Q8). Closes as not possible if none by 2026-12-01 |
 | K9 | RO6 evaluation at scale | K3, K7 (K8 if EMG) | L | todo |
@@ -337,7 +337,13 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
   `results/exogait/plots/k6_<id>_moment_vs_torque.png`.
 - **Done when:** **done:** a params row per participant; the comparison plotted in both modes;
   the TR conclusion in `notes/observations.md` ("K6").
-- **Left:** body mass and height per participant (J1b). A fitted calibration stays out of scope.
+- **Left:** scale the model per participant. Height and mass are published (Lhoste et al.
+  2026, Table 2; `models/exogait/participants.csv`, 47–90 kg against the model's 62 kg), so K5–K7
+  can be solved again on scaled bodies: about a night (`notes/decisions.md`, 2026-11-10). A fitted
+  calibration stays out of scope.
+- **Also left, and new:** check the model's left-right split of the vertical ground force
+  against `StanceInterpolationFactor`, which the paper says is exactly that, measured by the
+  footplates. The tracking never sees it, so it is a held-out test of the twin.
 
 ### K7 — AI + Moco integration (RO4, H4) · in progress: `ai` waits for K3
 
@@ -450,7 +456,7 @@ Processed data goes in `data/processed/exogait/` (gitignored, shared as a zip). 
 | `moco/summary.csv` | K5, K7, K8 | solve | see below |
 | `moco/moment_vs_torque.csv` | K6 | participant × condition × joint | RMS of the net joint moment, the muscles' moment, the gauge and the motor torque; the exo's share of the net moment and its correlation with it |
 | `moco/assist.csv` | K7 | participant × condition | effort per case, the changes in %, worst hip/knee RMSE and objective per case, torque rate per actuator, budget used, prices |
-| `params.csv` | K6 | participant | `participant, site, body_mass_kg, x2_mass_kg, anthropometry` (generic until J1b), `hip_offset_c_deg`, and per controller: stride counts, stride time, kinematic stride length and speed |
+| `params.csv` | K6 | participant | `participant, site, sex, age_y, height_m, mass_kg` (measured: `models/exogait/participants.csv`), `model_mass_kg` (62, generic until the model is scaled), `x2_mass_kg, anthropometry, hip_offset_c_deg`, and per controller: stride counts, stride time, kinematic stride length and speed |
 | `<ID>_emg.csv` | J6 | stride × phase point | `participant, stride, phase`, one column per muscle (normalised envelope) |
 | `ro6/cost.csv` | K9 | stage × participant × host | `stage, participant, host, seconds` |
 | `stats/*.csv`, `figures/exogait/*.png` | J7 | — | Tables per hypothesis and mode; figures |

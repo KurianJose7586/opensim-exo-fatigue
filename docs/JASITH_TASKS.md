@@ -54,7 +54,7 @@ Jasith takes work that runs on one or two participants or on already-processed d
 | ID | Task | Depends on | Size | Status |
 |---|---|---|---|---|
 | J1 | Mentor alignment: Python notice + questions | — | S | todo: send now |
-| J1b | Paper check: per-participant body mass and height | — | S | todo: now |
+| J1b | Paper check: per-participant body mass and height | — | S | **done** by Kurian, 2026-11-10: published, in `models/exogait/participants.csv` |
 | J2 | Dataset study | — | M | **done**: `docs/exogait_data.md`, PR #7 (approved, not merged) |
 | J3 | Preprocessing code (RO1) | J2 | L | **done** by Kurian, 2026-11-10 (all 19). Jasith reviews |
 | J4 | Splits and leakage audit | J2, J3 | M | **done** by Kurian, 2026-11-10. Jasith reviews |
@@ -73,7 +73,11 @@ Send notice 1 and questions 2–12 below. Record the answers in `notes/decisions
 as well: it withdraws the MATLAB request.
 **Done when** every question has an answer, or we proceed on the written default.
 
-### J1b — Paper check for K6
+### J1b — Paper check for K6 · done (Kurian, 2026-11-10)
+
+**Result:** the dataset's paper (Lhoste et al. 2026, J NeuroEng Rehabil 23:114, Table 2) lists
+height and mass for all 19. They are in `models/exogait/participants.csv` and `params.csv`. The
+same paper answers Q3's units, Q11 and Q12, and changes Q8 (`notes/observations.md`, "J1b").
 
 Check the ExoGait paper and the X2 paper (Kucuktabak et al., arXiv 2301.06244) for
 per-participant body mass and height. Record the values, or "none published", in
@@ -310,7 +314,8 @@ The plan as it was written:
    `JointTorques` RMS in AB68 walking is 18–20 Nm in TR vs 22–25 Nm in SM. Should we model both
    controllers, with the controller as an input, or SM only?
    *Default: both, controller as an input, results reported per controller.*
-3. **State-machine parameters.** May stiffness k and damping d be inputs? With angle and
+3. **State-machine parameters.** (Units answered by the paper: Nm/rad and Nm·s/rad.) May
+   stiffness k and damping d be inputs? With angle and
    velocity they nearly define the SM torque, so the model would be reconstructing the
    controller. Their units are also unconfirmed, which matters only if the answer is yes.
    *Default: excluded.*
@@ -330,7 +335,9 @@ The plan as it was written:
 7. **Ankle.** The ankle angle is not recorded. Is a reference or loosely tracked ankle
    acceptable in MocoTrack?
    *Default: the stock reference ankle, loosely tracked.*
-8. **EMG is missing.** The Dryad release (version 449435) has no EMG files, and none of the 19
+8. **EMG is missing.** (The paper says EMG was recorded for HL01–HL05 only, four or five
+   muscles per leg, and "will be made" public: so ask the authors.) The Dryad release (version
+   449435) has no EMG files, and none of the 19
    CSVs has an EMG column, although its README says EMG is in separate files. Do you have it? If
    not, we will write to the authors (clhost@ethz.ch, lvianello@sralab.org). Until it arrives,
    J6, K8 and H5 are blocked.
@@ -358,11 +365,16 @@ The plan as it was written:
     (K4–K9) to walking and ramps, or do you expect stairs in OpenSim?
     *Default: OpenSim on walking, plus ramps on a tilted floor. Stairs stay in the AI models (J5,
     K3), which need no musculoskeletal model.*
-11. **Gait state and stance factor.** Are `gait_state_*` and `StanceInterpolationFactor`
+11. **Gait state and stance factor.** **Answered by the paper: online.** The stance factor is
+    the left foot's share of the vertical force on the footplate sensors, and the state machine
+    switches on it. No longer a question for the mentor. As asked: are `gait_state_*` and
+    `StanceInterpolationFactor`
     computed online by the X2's state machine, or after the fact like `gait_cycle`?
     *Default: treated as offline, like phase: usable in the offline models, dropped in H2's
     no-phase arm, and excluded from any online claim.*
-12. **AB vs HL.** Are AB and HL the two sites (Chicago and Madrid), not clinical groups? The HL
+12. **AB vs HL.** **Answered by the paper: yes, the two sites** (AB in the U.S.A., HL in
+    Spain). No longer a question for the mentor. As asked: are AB and HL the two sites (Chicago
+    and Madrid), not clinical groups? The HL
     files start at t = 0 and have about 130–140 sampling intervals over 4.5 ms, against
     12,000–66,000 in the AB files, which fits a different recording set-up.
     *Default: AB = Chicago, HL = Madrid. `group` is a site label (the stairs and ramps differ),

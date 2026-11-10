@@ -30,8 +30,8 @@ time.**
 | | `controller` | **allowed** | Which controller ran (TR or SM). J1 Q2: both are modelled, with the controller as an input |
 | `condition_encoded` | — | not carried | The same label as a number |
 | `gait_cycle_left/right` | `phase` (0–100) | **allowed, offline** | Phase is interpolated between heel strikes, so it needs the *next* one (J1 Q4). H2 measures it as information, not as a deployable estimate. Its heel strikes also define the strides |
-| `gait_state_left/right` | `gait_state` (stride leg) | **allowed, offline** | Pending J1 Q11 (computed online?). It encodes phase, so H2's no-phase arm drops it. The other leg's is not carried |
-| `StanceInterpolationFactor` | `stance_alpha` | **allowed, offline** | As `gait_state`: pending Q11, dropped in the no-phase arm |
+| `gait_state_left/right` | `gait_state` (stride leg) | **allowed** | Computed online by the X2's state machine (Lhoste et al. 2026). It encodes phase, so H2's no-phase arm drops it. The other leg's is not carried |
+| `StanceInterpolationFactor` | `stance_alpha` | **allowed** | The left foot's share of the vertical ground force, from the footplate sensors, computed online (Lhoste et al. 2026). It encodes phase, so the no-phase arm drops it |
 | `SmoothedStanceInterpolationFactor` | — | not carried | The same signal, smoothed |
 | `step_complete_l/r` | — | used, not carried | Drops the strides the dataset marks incomplete. True on every kept stride |
 | `step_number_l/r` | — | **banned**, not carried | A session step counter: it encodes time order |
@@ -44,7 +44,7 @@ time.**
 | Column | Status | Reason |
 |---|---|---|
 | `participant` | key, **never an input** | A population model's test participant is unseen. A personalised model is fitted per participant |
-| `group` (AB / HL) | **allowed** | A site and device label by default (J1 Q12): Chicago and Madrid differ in stairs, ramps and recording set-up. Constant inside a personalised model |
+| `group` (AB / HL) | **allowed** | A site and device label (AB: U.S.A., HL: Spain; Lhoste et al. 2026): the two sites differ in stairs, ramps and recording set-up. Constant inside a personalised model |
 | `leg` (L / R) | **allowed** | Known at inference. The two sides of a device differ, and each gauge channel has its own offset of a few Nm |
 | `stride`, `block`, `row_start`, `row_end` | keys, **never inputs** | They encode the order of the session |
 | `<ID>_stride_features.csv` (duration, ROM, peak and RMS torque) | **never inputs** | Derived from the whole stride and from the target. Descriptive only |

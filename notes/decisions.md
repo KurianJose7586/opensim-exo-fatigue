@@ -494,3 +494,24 @@ val (two thirds) before the test blocks are scored.
   every model, the baselines included, after K3's choices are made on val.
 - The self-check writes to `predict/selfcheck/`: a population model depends on who is on disk,
   so a two-participant run must not overwrite the real rows.
+
+### 2026-11-10: J1b closed: use the published mass and height; scale the twin next
+
+J1b's default was "generic anthropometry, since ExoGait has none". The dataset's own paper
+(Lhoste et al. 2026, J NeuroEng Rehabil 23:114, Table 2) has height and mass for all 19
+(`observations.md`, "J1b"). So:
+
+- `models/exogait/participants.csv` holds them, and `params.csv` reports them.
+- **Proposed, not done:** scale `2D_gait.osim` per participant before K9: segment lengths by
+  height / the generic model's height, masses to the participant's body mass, muscle fibre and
+  tendon lengths with their segments, and maximum isometric force with mass. Then re-solve K5–K7
+  (38 tracking solves, the 16 SM comparisons and their second starts: about a night).
+  - Why: effort is a sum of squared activations, and activation is force over strength. A 90 kg
+    participant on a 62 kg body with the same joint angles is not that participant.
+  - Why not yet: K5–K7's results are consistent as they stand (one generic body, stated), and
+    the AI half is the critical path. The comparison "generic vs scaled" is itself a result.
+- **J1 Q3 (units), Q11 (online) and Q12 (AB/HL) are answered by the paper**, not by the mentor.
+  Q8 changes: the EMG exists for HL01–HL05 and was not released, so the authors are the ones to
+  ask (clhost@ethz.ch, lvianello@sralab.org).
+- `stance_alpha` and `gait_state` stay in the offline models and in H2's no-phase arm: being
+  online does not stop them encoding phase.

@@ -246,6 +246,20 @@ and a finding that for walking, the quick estimation method gives nearly the sam
 thorough one. That last one matters — it undercuts an argument we were going to make for E4, so we
 had to change how E4 is justified.)
 
+### Lhoste, Cantón, Küçüktabak, Short, … Vianello, Pons (2026)
+*Simplifying rehabilitation control of lower-limb exoskeletons in five ambulation modes via
+dataset-driven state-machine calibration.* J NeuroEng Rehabil 23:114. doi:10.1186/s12984-026-01917-8.
+Open access (PMC13045145).
+
+(The paper the ExoGait data comes from. It sets up a hip-and-knee exoskeleton's walking
+controller from a public dataset of people walking without one, tries it on 19 healthy people on
+flat ground, ramps and stairs, and finds they walk about a quarter faster than with the device
+merely getting out of their way.)
+
+What we use: Table 2 (each participant's sex, height, weight and age), the preferred walking
+speeds (0.26 m/s in TR), the footplate force sensors behind `StanceInterpolationFactor`, the
+controller's units, and the fact that EMG was recorded for the five Madrid participants.
+
 ---
 
 ## Not worth your time

@@ -711,6 +711,53 @@ Kurian took J3–J5 over (`decisions.md`, 2026-11-10). All numbers below are fro
 - The drawn foot is rigid (the model's toe joint is welded), so its tip dips under the floor
   line at toe-off. The contact spheres do not.
 
+### J1b: the dataset's paper gives every participant's mass and height, and answers three J1 questions (2026-11-10)
+
+The paper behind the Dryad dataset is Lhoste, Cantón, Küçüktabak, Short, … Vianello, Pons,
+"Simplifying rehabilitation control of lower-limb exoskeletons in five ambulation modes via
+dataset-driven state-machine calibration", J NeuroEng Rehabil 23:114 (2026),
+doi:10.1186/s12984-026-01917-8, open access (PMC13045145). Read through Europe PMC's full text.
+(It proposes a way to set up an exoskeleton's walking controller from a public dataset of
+unassisted walking, tests it on 19 healthy people on flat ground, ramps and stairs, and
+releases those recordings: the ExoGait data.)
+
+- **Mass and height are published, per participant** (its Table 2: sex, height, weight, age).
+  Copied to `models/exogait/participants.csv`. The copy reproduces the paper's own statistics:
+  69.5 ± 11.7 kg, 11 men and 8 women. Height 1.75 ± 0.09 m (1.58–1.88), mass 47–90 kg, age
+  23–45. The twin's body is 62 kg: it is 28 kg too light for AB68 and 15 kg too heavy for HL05.
+  `params.csv` now carries the measured values, and says the model is not yet scaled.
+- **Its walking speeds match ours.** Preferred overground speed in TR: 0.26 ± 0.087 m/s. K4's
+  kinematic estimate (hip travel over a mean stride) gives 0.27 ± 0.096 m/s for the same 19.
+  The paper has SM 27% faster (95% CI 19–35%); ours is 21% faster on the group means (0.327 vs
+  0.270 m/s). An independent check of the stride-length estimate that K5's speed comparison
+  leans on, and of how slow this walking is.
+- **AB and HL are the two sites** (J1 Q12): "AB" was recorded in the U.S.A., "HL" in Spain. Not
+  clinical groups.
+- **`StanceInterpolationFactor` is a measurement of load** (J1 Q11): the left foot's share of
+  the vertical ground reaction force, from 32 force-sensitive resistors in the two footplates.
+  The controller computes it online at 333 Hz, and switches gait state on a hip-angle
+  threshold and on this factor (threshold 0.2). So `stance_alpha` and `gait_state` are
+  online signals, not offline like `gait_cycle`. Two consequences:
+  - they stay out of H2's no-phase arm all the same, since they encode phase;
+  - **ExoGait does carry ground-reaction information after all**: not forces, but the
+    left-right split of the vertical force through the stride. K5's solutions predict that
+    split from the contact model, so it can be checked against the measurement. Nothing in the
+    tracking uses it, which makes it a held-out test of the twin. Not done yet.
+- **Heel strikes** come from the footplate sensors, and `gait_cycle` is interpolated between
+  them, as assumed (offline).
+- **SM parameter units** (J1 Q3): stiffness in Nm/rad, damping in Nm·s/rad. Starting values per
+  mode in its Table 1 (walking: hip 90 and 7, knee 70 and 4 in the stiffer of its two settings).
+- **Torque sensing:** four strain gauges on the link distal to each active joint, and the
+  interaction torque is estimated from them. That is K6's reading of `JointTorquesViaGauges`.
+  Peak torque 80 Nm, 100 W, joint speed limit 3 rad/s.
+- **EMG exists but is not released** (J1 Q8): for the five Madrid participants (HL01–HL05),
+  rectus femoris, vastus lateralis, tibialis anterior and medial gastrocnemius on both legs (the
+  Dryad README adds biceps femoris). The paper only says the data "will be made publicly
+  available". Dryad has none. So the request goes to the authors, and it is for five people.
+- **What follows for K6.** The twin can be scaled per participant (segment lengths by height,
+  masses by body mass), which is what RO3 ("participant-informed") asks for. It means solving
+  K5–K7 again on 19 scaled models, about a night. Not started: it is a decision (`decisions.md`).
+
 ---
 
 ## Open questions
