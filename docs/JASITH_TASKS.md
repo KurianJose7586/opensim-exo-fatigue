@@ -304,10 +304,16 @@ interaction-force units do not matter: those columns are not carried.
    *Default: we write to the authors this week. If no EMG by 2026-12-01, RO5 and H5 are
    reported as not tested (data not released), K8 and J6 close as not possible, and J9 states
    it in the limitations.*
-9. **Which torque column is the target?** `JointTorques` and `JointTorquesViaGauges` are
-   uncorrelated (r = −0.20 to 0.02 in AB68 walking), and the gauge torque is nonzero while
-   standing.
-   *Default: `JointTorques`. The gauge torque is kept in the processed files for a later check.*
+9. **Which torque column is the target?** They are two different torques (K6, all 19
+   participants; `checks.py` asserts it). `JointTorques` is the motor-side torque that the
+   controller commands. `JointTorquesViaGauges` is the torque at the joint output, the one
+   that reaches the wearer: `JointTorques` minus the gauge torque is the motor's rotor inertia
+   (fitted 1.8–2.3 kg m², published 1.87) plus friction, with R² 0.82–0.98. That difference is
+   about as large as the torque itself, which is why the two looked uncorrelated. The gauge
+   torque also carries a constant offset of a few Nm.
+   *Default: predict both, each reported separately (`hip_tau, knee_tau` = `JointTorques`;
+   `hip_tau_gauge, knee_tau_gauge` = the gauge torque). The OpenSim work (K5–K9) replays the
+   gauge torque. If only one is wanted, we propose the gauge torque: it is the assistance.*
 10. **Stairs and the 2D model.** Stairs reach 83–114° knee flexion. In `2D_gait.osim` the
     gastrocnemius knee moment arm flips sign near 100°, and the quadriceps arms fall to about
     1.4 cm by 80°. Walking and ramps reach 70–85° per stride, with ramp maxima up to 91° (AB68).

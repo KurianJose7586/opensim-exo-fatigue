@@ -72,8 +72,8 @@ One flat package, `src/exogait/`. One file per job, each with an assert-based se
 | `evaluate.py` | J5, K3, K9 | scikit-learn | `metrics()`, results writer, H1–H3 ablation loop. Phase mean and ridge by default; forests, GPR and the LSTM with `--models` |
 | `lstm.py` | K3 | torch | LSTM/GRU with `fit`/`predict`, so `evaluate.py` runs it like the sklearn models |
 | `x2model.py` | K4 | opensim | `2D_gait.osim` + X2 masses and hip/knee actuators; X2 → OpenSim coordinates |
-| `track.py` | K5, K6 | opensim | MocoTrack per stride (the `measured` case); `params.csv`; ID moments vs X2 torque |
-| `assist.py` | K7, K8, K9 | opensim | The `none`, `ai`, `optimised` and `emg` cases, and the at-scale loop |
+| `track.py` | K5, K6 | opensim | MocoTrack per stride, the exo torque prescribed or chosen (`case`); `params.csv`; joint moments vs X2 torque |
+| `assist.py` | K7, K8, K9 | opensim | Compares the cases (`none`, `measured`, `optimised`, `ideal`; later `ai`, `emg`), prices the torque budget; the at-scale loop |
 | `emg.py` | J6 | scipy.signal | EMG envelopes per stride (when EMG arrives) |
 | `stats.py` | J7 | scipy.stats, matplotlib | Paired tests, effect sizes, figures |
 
@@ -93,13 +93,13 @@ with `src/fatigue` on `sys.path`).
 
 | ID | Task | Depends on | Size | Status |
 |---|---|---|---|---|
-| K1 | Environment and data | — | M | **done** (PR #6, approved, not merged). MATLAB part dropped. Env follow-up below |
+| K1 | Environment and data | — | M | **done** (PR #6, approved, not merged). MATLAB part dropped. Env rebuilt 2026-11-10, with CUDA torch |
 | K2 | Preprocessing at scale (RO1) | J3 (preprocess); J4 (`split.py`, for the last done-when bullet) | L | todo |
 | K3 | Nonlinear torque models (RO2, H1–H3) | K2, J4, J5 | L | todo |
 | K4 | OpenSim model and X2 mapping (RO3) | K1, J2 | L | **in progress**: model, mapping and torque sign done; Jasith's plot check left |
-| K5 | MocoTrack: reproduce the gait | K4 | L | todo |
-| K6 | Personalised twin state (Layer 4) | K5; J1b (soft: generic anthropometry is the default) | M | todo |
-| K7 | AI + Moco integration (RO4, H4) | K3, K5, K6, J1 Q5 | L | todo |
+| K5 | MocoTrack: reproduce the gait | K4 | L | **walking done** on mean strides, all 19 × SM/TR. Single strides (need J3) and ramps left |
+| K6 | Personalised twin state (Layer 4) | K5; J1b (soft: generic anthropometry is the default) | M | **done** on mean walking strides. Mass and height wait for J1b |
+| K7 | AI + Moco integration (RO4, H4) | K3, K5, K6, J1 Q5 | L | **in progress**: `none`, `measured`, `optimised` done on mean SM strides (16 participants). `ai` waits for K3 |
 | K8 | Assist-as-needed controller with EMG (Layer 6, H5) | K7, J6 | L | **blocked**: no EMG (J1 Q8). Closes as not possible if none by 2026-12-01 |
 | K9 | RO6 evaluation at scale | K3, K7 (K8 if EMG) | L | todo |
 
@@ -113,11 +113,11 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
   That problem is a 0.47 s half-cycle with a symmetry goal, not an ExoGait stride (K5, K9).
 - All 19 CSVs in `data/raw/exogait/` (gitignored). Dryad blocks scripted downloads: by hand.
 - Details: `notes/observations.md`, "K1".
-- **Follow-up (S, now):** the env was gone from `~/micromamba` by 2026-10-28 (K4 worked
-  around it). Rebuild it from ONBOARDING §2, which now includes scikit-learn, with the CUDA torch
-  wheel (Shared rules). Done when `torch.cuda.is_available()` prints True and the K1 example
-  solves again. torch and opensim stay in separate
-  processes (Shared rules), so no one-process test is needed.
+- **Env rebuilt 2026-11-10** from ONBOARDING §2 (it had gone from `~/micromamba`): micromamba
+  2.10.0, Python 3.11.18, opensim 4.6, numpy 2.4.6, scikit-learn 1.9.1, on OpenBLAS. MocoTrack
+  runs in it (all of K5).
+- **CUDA torch is in** (2.14.1+cu126): `torch.cuda.is_available()` is True on the RTX 2050.
+  torch and opensim stay in separate processes (Shared rules), so no one-process test was run.
 
 ### K2 — Preprocessing at scale (RO1)
 
@@ -130,7 +130,8 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
   - **`time` stays float64.** The raw clock runs to 1,234–4,855 s, where float32 resolves only
     0.12–0.49 ms: it turns 0–33 real dt ≤ 0 per file into up to 1,238. float32 only for angle,
     velocity and torque columns.
-- **Known traps (J2, checked on all 19):** AB72's column order; every HL file (33 dt ≤ 0 each,
+- **Known traps (J2, checked on all 19):** AB82's left-knee gauge torque is stuck at −12.07 Nm
+  in SM walking, SM ramps and TR ramps (K5); AB72's column order; every HL file (33 dt ≤ 0 each,
   `*_UNDEFINED2` labels); 1–3 dt ≤ 0 in AB69/72/76/80/82; removed rests up to 352 s; two sites
   (Chicago and Madrid) with different stairs and ramps.
 - **In:** `data/raw/exogait/*.csv`, read only.
@@ -210,15 +211,17 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
   - X2 mass 20.7 kg welded on: Kucuktabak et al., IEEE T-RO (arXiv 2301.06244), Table II,
     backpack 10.3 kg, thigh 2.84, shank 1.11 and foot plate 1.25 kg per leg; COMs from CORC.
   - Hip and knee exo actuators, both legs, ±80 Nm (T-RO Sec. II-A; the data reach 85–89 Nm, so
-    K7's replay needs wider bounds). Rotor inertia (1.87 kg m² per joint) and friction are left
-    out: `JointTorques` looks motor-side, so K6/K7 subtract them.
+    a replay of single strides may need wider bounds). Rotor inertia (1.87 kg m² per joint) and
+    friction are left out, rightly: they sit between `JointTorques` (motor side) and
+    `JointTorquesViaGauges` (joint output), and K5 replays the gauge torque (K6).
 - **Mapping (done):**
   - `knee_angle` = X2 knee; `hip_flexion` = X2 hip − c; `pelvis_tilt` = `BackPackAngle` − 90° + c.
     The X2 hip is measured from the backpack (checked on all 19). c is per participant and holds
     the mean pelvis tilt at the reference's −15.06°, because the backpack level differs by site
     (AB68 −14.2°, HL03 −5.4°, range −0.6 to −23.8°). c is a K6 parameter.
-  - **Torque sign (done):** `+JointTorques` drives the angle +, so it is OpenSim's generalized
-    force sign: exo control = `JointTorques` / 100. `checks.py` asserts it from the SM impedance law.
+  - **Torque sign (done):** `+JointTorques` drives the angle +, so the X2 torques have OpenSim's
+    generalized force sign: exo control = torque / 100. `checks.py` asserts it from the SM
+    impedance law, on all 19.
   - Target = the mean of the clean strides of one participant × condition, right heel strike to
     right heel strike, made periodic with its mean kept. `BackPackAngle` strides the gyro does
     not confirm are dropped from `pelvis_tilt` and c only. Once `preprocess.py` lands,
@@ -249,112 +252,119 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
   - **left:** the zero-offset **[open]** line in `docs/exogait_data.md` is updated with the c mapping
     (same PR #7 dependency).
 
-### K5 — MocoTrack: reproduce the gait
+### K5 — MocoTrack: reproduce the gait · walking done on mean strides
 
-- **Code:** `src/exogait/track.py`, starting from the `example2DWalking.py` set-up K1 already
-  runs, with its bounds and time window replaced (below). The first goal is reproduction, not
-  optimisation.
-- **Problem:**
-  - One full right stride, with both legs' recorded angles. Initial and final time come from
-    the stride: the median is 2.9 s, against the example's 0.47 s half-cycle. The example's
-    symmetry trick is not needed.
-  - **Replace the example's bounds:** knee −120°…10° (the model's range; the example stops at
-    −50°), hip −25…95° (mapped with c it reaches 78°), `pelvis_tilt` from the mapped
-    `BackPackAngle` ± 10°, ankle ±30°, `pelvis_tx` unbounded above.
-  - No GRF tracking (ExoGait has no GRF; weight 0, as in K1).
-  - **Settings from K4's tracking trial** (hip/knee-only tracking of the model's own reference;
-    `notes/observations.md`, "K4"):
-    - control effort weight 1, not the example's 10 (at 10, 3 of 7 runs pinned bounds or found a
-      wrong gait);
-    - speed as a final-value bound on `pelvis_tx` (v·T), never `MocoAverageSpeedGoal`, which
-      ignores direction (one run walked backwards). Without any speed the model walked 21% slow.
-      Where v comes from for the X2 is open (walkway length / bout time is the default);
-    - `pelvis_tilt` tracked at a low weight (about 0.2× hip/knee, untested) or free;
-    - initial guess: the tracked states, `pelvis_tx` = v·t, `pelvis_ty` = 0.90 m, ankle 0;
-    - mesh interval T/50 first, then T/100 as the check.
-  - No hard periodicity: a real stride is not periodic.
-  - The exo actuators replay the measured X2 torque (`hip_tau, knee_tau` and
-    `hip_tau_other, knee_tau_other` of the right stride in `<ID>_strides.csv`), in both modes,
-    since TR torque is not near zero. Use `MocoControlTrackingGoal`: the PrescribedController
-    route was infeasible before (decisions.md 2026-10-02). It is a soft goal, so `summary.csv`
-    records `exo_replay_rmse` per joint. **This solve is K7's `measured` case.**
-  - **TR caveat:** in TR the replayed torque includes compensation for X2 friction and inertia
-    that the model lacks. Report TR results separately. They count for H4 only if K6's TR check
-    supports it.
-- **Ramps:** rotate the floor `ContactHalfSpace` by the site's ramp angle per solve (5° Chicago,
-  6° Madrid; the site comes from J1 Q12; the sign comes from up or down).
-- **Cost first:** on the periodic mean stride `x2model.py` writes (HL03 SM first: the most
-  symmetric, 46 strides), record solve time and peak memory, and compare a mesh interval of
-  0.04–0.05 s with Moco's default 0.02 s. Keep the coarser one if the tracking RMSE barely
-  changes. Then single strides. K9's scope rests on these numbers.
-- **Order:** one walking stride (cost), then walking for one participant, TR then SM. Then ramps.
-  Stairs only after J1 Q10.
-- **Out:** `results/exogait/moco/<ID>_<stride>_measured.sto` and a row in
-  `results/exogait/moco/summary.csv`.
+- **Code:** `src/exogait/track.py`. One solve = one participant × condition × case, on the
+  **mean stride** `x2model.py` builds. The first goal is reproduction, not optimisation.
+- **Problem** (the `example2DWalking.py` tracking problem, changed as below; reasons in
+  `notes/decisions.md`, 2026-11-10):
+  - One full mean stride (1.9–5.6 s), periodic in every state but `pelvis_tx`. No L/R symmetry.
+  - Tracked: hip and knee at weight 10 against effort 1; `pelvis_tilt` at 0.2 of that; the stock
+    walk's ankle at 0.001 of it (the J1 Q7 default). All low-passed at 6 Hz as periodic curves.
+  - **The exo actuators replay the mean `JointTorquesViaGauges`**, held exactly by a path
+    constraint (`MocoControlBoundConstraint`). It is the joint-output torque (K6). This solve is
+    K7's `measured` case.
+  - Speed is not imposed. The pelvis only has to advance by 0.5–1.3 of a kinematic stride
+    estimate; the stride length is the model's own, and it is checked against the data (below).
+  - Reserves at every coordinate (1 Nm = 1 excitation), reported per coordinate.
+  - Bounds: knee −120°…10°, hip −25…95°, ankle ±30°, `pelvis_tilt` = the mapped mean ± 10°.
+  - No GRF tracking: ExoGait has none.
+  - **Start:** every solve starts from `models/exogait/seed_stride.sto` (a converged HL03 SM
+    stride), stretched in time. From the tracked states alone IPOPT usually wanders.
+  - 50 mesh intervals per stride, IPOPT tolerance 1e-3 (constraints 1e-4).
+- **Run:** `micromamba run -n opensim python -u src/exogait/track.py [ID] [condition] [mesh]
+  [guess .sto | seed | cold] [case]`. About 5–10 minutes with 4 threads
+  (`OPENSIM_MOCO_PARALLEL=4`), four at a time on this machine, 0.5–0.6 GB each.
+- **Out:**
+  - `results/exogait/moco/<ID>_<condition>_mean_<case>_m<mesh>.sto`;
+  - a row in `results/exogait/moco/summary.csv` (File formats), including the verdict of the
+    plausibility checks;
+  - `results/exogait/plots/k5_<name>.png`.
 - **Done when:**
-  - walking is tracked, with tracking RMSE reported per joint;
-  - the self-check asserts plausibility: joint limits, signs, no tracked coordinate on a bound,
-    exo torque within the X2 limits, `exo_replay_rmse` below 1 Nm, per-joint reserves small next
-    to the net moment;
-  - solve time, peak memory and the chosen mesh interval are recorded in
-    `notes/observations.md`.
+  - **done:** walking is tracked, with tracking RMSE reported per joint (all 19 × SM/TR; numbers
+    in `notes/observations.md`, "K5");
+  - **done:** the self-check asserts plausibility: converged; hip and knee RMSE under 3°; pelvis
+    under 6°; inside the joint ranges and no tracked coordinate on a bound; knee never past 5°
+    of extension; the exo torque as prescribed (under 1 Nm RMS off); joint reserves under 5 Nm
+    RMS; stride length off its bounds; peak vertical force under 2.5 body weights;
+  - **done:** solve time, peak memory and the chosen mesh are in `notes/observations.md`.
+- **Left:**
+  - **Single strides** (K7's per-stride cases and K9). They need J3's `<ID>_strides.csv`. A
+    single stride is not periodic: drop the periodicity goal for it.
+  - **Ramps:** rotate the floor `ContactHalfSpace` by the site's ramp angle (5° Chicago, 6°
+    Madrid; J1 Q12). The stride filters leave 0–15 clean ramp strides per participant, so the
+    bout-edge rule needs a second look first.
+  - Stairs only after J1 Q10.
 
-### K6 — Personalised twin state (Layer 4)
+### K6 — Personalised twin state (Layer 4) · done on mean walking strides
 
-- **Code:** `track.py`.
-- **State estimation:** MocoTrack (K5) reconstructs the states ExoGait does not record (pelvis
-  translation, ankle, muscle states) from the recorded hip, knee and backpack angles. Write
-  down which states are measured and which are estimated.
-- **Calibration:**
-  - **Per-participant parameters:** body mass and height if the papers list them (J1b), else
-    generic, stated. X2 masses from K4.
-  - **Moment vs torque:** net hip and knee moments from an ID-equivalent solve vs the measured
-    X2 torque, **in SM and in TR**. Use the `twin.net_moments()` pattern (muscles removed,
-    reserves only). Magnitude only: K4 fixed the sign.
-  - **TR:** write down whether TR torque looks like assistance or mostly device compensation.
-    K5 and K7 use the TR `measured` case for H4 only if it is the former.
-  - A fitted calibration (e.g. muscle strength scaled to the measured torque) is out of scope:
-    there are no GRF or anthropometrics to fit against.
-- **Out:** `results/exogait/params.csv`, one row per participant; a PNG of moment vs torque per
-  mode.
-- **Done when:** there is a params row per participant, the comparison is plotted for at least
-  one participant in both modes, and the TR conclusion is in `notes/observations.md`.
+- **Code:** `track.py` (`params`, `k6`).
+- **State estimation:** which states come from where.
 
-### K7 — AI + Moco integration (RO4, H4)
+  | State | Source |
+  |---|---|
+  | hip and knee angles, both legs | measured (X2 encoders), tracked to about 0.5° |
+  | `pelvis_tilt` | measured as `BackPackAngle`, mapped with the per-participant offset c (K4), tracked to about 2° |
+  | X2 torque at the four joints | measured (`JointTorquesViaGauges`), replayed exactly |
+  | ankle angles | estimated by the solve, with the stock walk's ankle as a weak prior |
+  | pelvis translation, so stride length and speed | estimated by the solve (checked against the data) |
+  | lumbar angle | estimated by the solve, within 0–20° |
+  | ground reaction forces | estimated by the solve (the contact model) |
+  | muscle activations and forces | estimated by the solve (generic muscles) |
 
-- **Code:** `src/exogait/assist.py`. It imports opensim only and reads K3's predictions from CSV.
-- **Cases, per stride:**
+- **Per-participant parameters:** `results/exogait/params.csv`, one row per participant: the hip
+  offset c, stride time, stride counts, the kinematic stride length and speed per controller,
+  and the masses used. Body mass and height are generic (62 kg, the 2D model's) until J1b finds
+  them in the papers; the X2 adds 20.7 kg.
+- **Which torque column:** `JointTorquesViaGauges` is the joint-output torque, `JointTorques`
+  the motor side (`notes/decisions.md`, 2026-11-10). `checks.py` asserts it on every participant.
+- **Moment vs torque:** `track.py k6 <ID>` sums the hip and knee moments from the K5 solutions
+  themselves (muscle tendon force × moment arm, plus exo, plus reserves) and compares them with
+  the measured torque, in SM and TR. It replaced the ID re-solve of the `twin.net_moments()`
+  pattern, which left 3–4% of body weight in pelvis residuals on the splined kinematics.
+- **Out:** `results/exogait/params.csv`; `results/exogait/moco/moment_vs_torque.csv`;
+  `results/exogait/plots/k6_<id>_moment_vs_torque.png`.
+- **Done when:** **done:** a params row per participant; the comparison plotted in both modes;
+  the TR conclusion in `notes/observations.md` ("K6").
+- **Left:** body mass and height per participant (J1b). A fitted calibration stays out of scope.
+
+### K7 — AI + Moco integration (RO4, H4) · in progress: `ai` waits for K3
+
+- **Code:** `src/exogait/assist.py`, on top of `track.solve(case=...)`. It imports opensim only
+  and will read K3's predictions from CSV.
+- **Cases, per stride** (today: the mean stride):
 
   | Case | Exo torque |
   |---|---|
-  | `none` | off |
-  | `measured` | measured X2 torque replayed: K5's solve (the proposed H4 baseline) |
-  | `ai` | K3's predicted torque replayed (full-input, personalised, the model K3 ranks best on validation) |
-  | `optimised` | Moco picks the hip and knee torque within the X2 limits and the `measured` budget, warm-started from `ai` |
+  | `none` | held at zero |
+  | `measured` | the measured joint-output torque replayed: K5's solve (the H4 baseline) |
+  | `ai` | K3's predicted torque replayed (full-input, personalised, the model K3 ranks best on validation). **Not built: needs K3** |
+  | `optimised` | Moco picks the hip and knee torque within the X2 limits **and the `measured` budget** |
+  | `ideal` | Moco picks the torque at almost no cost, within the X2 limits only. An upper bound, never the H4 test (J1 Q5). Solved only on request |
 
-- **`optimised` needs a budget.** It is the Dembia ideal-device formulation in `twin._add_exo`,
-  whose device is nearly free (`EXO_WEIGHT` = 1e-3). The measured torque is a feasible point of
-  that problem, so without a budget `optimised` beats `measured` by construction and H4 cannot
-  fail.
-  - The budget: per exo actuator, the integral of squared torque over the stride is no more
-    than the measured profile's. Set it as a `MocoControlGoal` on that actuator's control in
-    endpoint-constraint mode. The self-check asserts it holds.
-  - An unbudgeted run, if made, is reported as an upper bound on the achievable reduction, never
-    as the H4 test (J1 Q5).
-- **Strides:** `ai` and `optimised` run only on right test strides whose overlapping left strides
-  are also test strides with predictions. The left-leg torque is stitched from those two left
-  strides on `t` and interpolated. In-sample predictions are never used.
-- **Effort:** the sum of squared muscle activations (the J1 Q5 default), integrated over the
-  stride and recomputed from each solution, the same way for every case. Never the Moco
-  objective value, which includes the tracking terms.
-- **Constraints:** the X2 torque limits as actuator bounds; a tracking-error bound asserted on
-  every solve; `exo_replay_rmse` below 1 Nm for `ai`, as for `measured`. For a shared hip/knee
-  budget, see the `allocate.candidates()` note in Code layout.
-- **TR:** as in K5, TR results are reported separately.
-- **Out:** a `.sto` per solve, and rows in `results/exogait/moco/summary.csv`.
-- **Done when:** the effort change of `optimised` vs `measured` and vs `none` is shown, with the
-  tracking bound, the X2 limits and the budget satisfied and `smoothness` reported per joint, on
-  at least one participant and mode.
+- **The budget:** per exo actuator, the integral of squared torque over the stride is no more
+  than the measured profile's. Without it `optimised` beats `measured` by construction.
+  - Moco 4.6 cannot constrain that integral (`notes/decisions.md`, 2026-11-10). So each
+    actuator's squared torque is priced in the effort goal, and `assist.budgeted()` adjusts the
+    four prices until each actuator spends 90–102% of its budget. That is the optimum under the
+    budget. It takes 3–6 solves, each started from the last.
+- **Effort:** the sum of squared muscle activations, integrated over the stride and recomputed
+  from each solution, the same way for every case. Never the Moco objective.
+- **Second starts:** IPOPT lands in different local solutions from different starts, and one
+  repeat doubled the effort (`notes/decisions.md`, 2026-11-10). `assist.py second` re-solves
+  `measured` from the `none` solution and `none` from the `optimised` one, and keeps the lower
+  objective. Run it before reading a comparison. A full multi-start is still to come.
+- **Constraints:** the X2 torque limits as actuator bounds; the K5 plausibility checks on every
+  solve (the tracking bound among them); the budget asserted on `optimised`.
+- **Smoothness:** the RMS rate of each exo torque (Nm/s) is in `summary.csv` and `assist.csv`.
+  It is reported, not limited: the optimised torque is 2–3 times less smooth than the measured.
+- **TR:** reported separately. In TR the delivered torque mostly carries the device (K6).
+- **Out:** a `.sto` and a `summary.csv` row per solve; a row per participant × condition in
+  `results/exogait/moco/assist.csv`; `results/exogait/plots/k7_<id>_<condition>_assist.png`.
+- **Done when:** **done on mean strides:** the effort change of `optimised` vs `measured` and vs
+  `none` is shown, with the tracking bound, the X2 limits and the budget satisfied and smoothness
+  reported per joint (numbers in `notes/observations.md`, "K7"). **Left:** the `ai` case (K3),
+  single test strides (J3, J4), and a torque-rate limit on `optimised` if the mentor wants one.
 
 ### K8 — Assist-as-needed controller with EMG (Layer 6, H5) · blocked
 
@@ -374,15 +384,19 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
 - **Code:** loops in `evaluate.py` (prediction) and `assist.py` (Moco); no new file.
   - The task list is participant × mode × controller × stride × case. One output per task,
     skipped if already on disk, stamped with the git commit: the `sweep.py` pattern.
-  - `multiprocessing.Pool` with one single-threaded Moco per worker, as `sweep.py` does. Each
-    worker chdirs to its own temp dir (as in `sweep._run_one`) and names its MocoTrack per task,
-    since Moco writes its stop file and `<name>_tracked_*.sto` into the cwd. RAM sets the worker
-    count: K5 measured one solve's peak memory.
+  - Several solves at once, each a process of its own. `track.solve()` already runs each in
+    its own `moco/work/<name>/` folder, since Moco writes its stop file and
+    `<name>_tracked_states.sto` into the cwd, and never rewrites the shared model file.
+  - K5's numbers: 0.5–0.6 GB and 5–10 minutes per solve with 4 threads
+    (`OPENSIM_MOCO_PARALLEL=4`), four at a time on this machine. CPU sets the worker count, not
+    RAM.
 - **Scope:** one ExoGait stride lasts about 2.9 s (median of 3,166 right strides on walking and
   ramps), 6× the example's half-cycle, so expect minutes per solve.
   - **Default:** up to 5 eligible right test strides per participant × mode × controller
-    (19 × 3 × 2 × 5 = 570 strides × 4 cases, about 2,300 solves) at K5's mesh interval. At a few
-    minutes per solve that is days on this machine, not a night.
+    (19 × 3 × 2 × 5 = 570 strides). Per stride that is one solve each for `none`, `measured`
+    and `ai`, a second start for the first two, and 3–5 for `optimised` (the price search):
+    about 5,000 solves at 50 mesh intervals. At about 2 minutes per solve net, four at a time,
+    that is about a week on this machine, not a night.
   - All strides would be about 1,000 CPU-hours: the DGX (Parked, access requested in Order 1).
 - **Measures:**
   - prediction accuracy (the J5/K3 rows);
@@ -418,9 +432,11 @@ Processed data goes in `data/processed/exogait/` (gitignored, shared as a zip). 
 | `predict/<model>_<ID>_pred.csv` | K3 | stride × phase point | `participant, stride, leg, scheme, ablation, phase, t, hip_tau_pred, knee_tau_pred` (test strides only) |
 | `model/2D_gait_x2.osim` | K4 | — | OpenSim model |
 | `coords/<ID>_<stride>.sto` | K4 | time point | model coordinate names, radians |
-| `moco/<ID>_<stride>_<case>.sto` | K5, K7, K8 | — | MocoTrajectory |
+| `moco/<ID>_<condition>_mean_<case>_m<mesh>.sto` | K5, K7, K8 | — | MocoTrajectory of a mean stride. Single strides later: `<ID>_<stride>_<case>` |
 | `moco/summary.csv` | K5, K7, K8 | solve | see below |
-| `params.csv` | K6 | participant | `participant, group, body_mass_kg, height_m, mass_source` (paper/generic), `backpack_kg, thigh_link_kg, shank_link_kg` |
+| `moco/moment_vs_torque.csv` | K6 | participant × condition × joint | RMS of the net joint moment, the muscles' moment, the gauge and the motor torque; the exo's share of the net moment and its correlation with it |
+| `moco/assist.csv` | K7 | participant × condition | effort per case, the changes in %, worst hip/knee RMSE and objective per case, torque rate per actuator, budget used, prices |
+| `params.csv` | K6 | participant | `participant, site, body_mass_kg, x2_mass_kg, anthropometry` (generic until J1b), `hip_offset_c_deg`, and per controller: stride counts, stride time, kinematic stride length and speed |
 | `<ID>_emg.csv` | J6 | stride × phase point | `participant, stride, phase`, one column per muscle (normalised envelope) |
 | `ro6/cost.csv` | K9 | stage × participant × host | `stage, participant, host, seconds` |
 | `stats/*.csv`, `figures/exogait/*.png` | J7 | — | Tables per hypothesis and mode; figures |
@@ -445,12 +461,17 @@ Processed data goes in `data/processed/exogait/` (gitignored, shared as a zip). 
 - **Not carried at all:** desired torque, the three interaction-force families, `step_number_*`
   (a session counter), `SM_Gui_Parameter`, `SmoothedStanceInterpolationFactor`.
 
-**`moco/summary.csv` columns:** `participant, stride, mode, controller, case`
-(none/measured/ai/optimised/emg), tracking RMSE per coordinate (deg), reserve RMS per joint
-(Nm), peak exo torque per joint (Nm), `exo_replay_rmse` per joint (Nm; `measured` and `ai`),
-`smoothness` per joint (RMS of d(exo torque)/dt, Nm/s), `effort` (sum of squared muscle
-activations integrated over the stride, recomputed from the solution, never the objective
-value), `solve_s, success, host, commit`.
+**`moco/summary.csv` columns** (one row per solve; a re-solve appends, so take the last row per
+key): `participant, condition, case` (none/measured/ideal/optimised, later ai/emg), `target`
+(mean; later a stride id), `n_mesh, T, strides`; `success, status, iterations, solve_s,
+peak_mem_gb, objective`; the settings `track_w, pelvis_w, ankle_w, tol, warm_start`;
+`rmse_<coordinate>` (deg); per exo actuator `replay_rmse_` (Nm, prescribed cases),
+`exo_rms_` (Nm), `exo_int2_` and `exo_budget_` (Nm² s), `exo_rate_rms_` (smoothness, Nm/s);
+`reserve_rms_<coordinate>` (Nm, or N for the pelvis translations); `effort` (the sum of squared
+muscle activations integrated over the stride, recomputed from the solution, never the
+objective value) and `mean_activation`; `stride_len_fk, stride_len, speed`; ankle and lumbar
+ranges, `min_pelvis_ty`, `peak_grf_bw_<side>`; `check` (ok, or the first plausibility check
+that failed); `host, commit`.
 
 **Population folds** are leave-one-participant-out and need no column. The fold for
 participant P:
@@ -478,11 +499,12 @@ This is the default; J4 may change it.
 
 ## Order
 
-1. **Now:** merge PRs #6 and #7. Do the K1 env follow-up. Ask the supervisors for DGX access
-   (K9 at full scale). Finish K4, including the torque sign. Then K5: one walking stride for
-   cost, then walking TR, then SM.
+1. **Now:** merge the open PRs (#6, #7, #8, #9, then the K5–K7 one). Ask the supervisors for
+   DGX access (K9 at full scale). K4 waits only on Jasith's plot check.
 2. Run K2's preprocessing as soon as J3 lands; run `split.py` on all 19 once J4 lands; then K3.
-3. K6, K7. Add ramps to K5 meanwhile, on the tilted floor.
+   **This is the critical path: K3, K7's `ai` case and K9 all wait on J3, J4 and J5.**
+3. K5 on single strides (needs J3's strides file) and on ramps (tilted floor). K7's `ai` case
+   once K3 has predictions.
 4. K9. K8 when EMG arrives; if none by 2026-12-01, K8 closes as not possible.
 
 Sync after each stage. Anything that changes a handoff (column names, file formats, splits) gets
