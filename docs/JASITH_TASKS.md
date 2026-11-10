@@ -58,9 +58,9 @@ Jasith takes work that runs on one or two participants or on already-processed d
 | J2 | Dataset study | — | M | **done**: `docs/exogait_data.md`, PR #7 (approved, not merged) |
 | J3 | Preprocessing code (RO1) | J2 | L | **done** by Kurian, 2026-11-10 (all 19). Jasith reviews |
 | J4 | Splits and leakage audit | J2, J3 | M | **done** by Kurian, 2026-11-10. Jasith reviews |
-| J5 | Baselines and shared metrics (RO2) | J3, J4; K2 for the full run | M | **done** by Kurian, 2026-11-10, scored on val. The `--test` pass waits for K3 |
+| J5 | Baselines and shared metrics (RO2) | J3, J4; K2 for the full run | M | **done** by Kurian: val 2026-11-10, the test pass 2026-11-11 |
 | J6 | EMG features (RO5) | J3 | M | **blocked**: no EMG (Q8). Closes as not possible if none by 2026-12-01 |
-| J7 | Statistics and figures (H1–H4, RO6) | J5, K3, K9 | M | **code done** by Kurian (`stats.py`); final numbers follow the test pass. RO6 cost tables wait for K9 |
+| J7 | Statistics and figures (H1–H4, RO6) | J5, K3, K9 | M | **done** by Kurian, 2026-11-11 (`stats.py test`): H1–H4 each have a test, a p-value, an effect size and a figure. RO6 cost tables wait for K9 |
 | J8 | Realign the docs and remove MATLAB | J1 (only for the title) | M | **done** by Kurian, 2026-11-11: README, PROJECT_GUIDE and ONBOARDING rewritten; the old guide archived. The title is unchanged, with a footnote |
 | J9 | Literature and write-up | J5, J7 | L | todo |
 

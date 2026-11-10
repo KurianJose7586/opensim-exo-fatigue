@@ -43,14 +43,14 @@ The dataset is the ExoGait Benchmark (Lhoste et al. 2026, J NeuroEng Rehabil 23:
 | | What | Code | State (2026-11-11) |
 |---|---|---|---|
 | RO1 | Reproducible preprocessing | `preprocess.py`, `split.py` | **Done.** 5,964 strides from all 19, whole-block train/val/test splits, a leakage self-check |
-| RO2 | Participant-specific torque models | `evaluate.py`, `lstm.py` | **Built; scored on the validation blocks.** Phase mean, ridge, random forest, bagged trees, LSTM. The test blocks are being scored |
+| RO2 | Participant-specific torque models | `evaluate.py`, `lstm.py` | **Done.** Phase mean, ridge, random forest, bagged trees, LSTM, scored once on held-out test blocks. The personalised LSTM predicts the torque at the joint to 2.4 Nm in walking (R² 0.97 hip, 0.94 knee) |
 | RO3 | Participant-informed simulation | `x2model.py`, `track.py` | **Done on mean walking strides,** on a generic body. Each participant's height and mass are published and not yet used |
-| RO4 | AI torque + Moco | `assist.py` | **Three of four cases done** (exo off, measured, optimised). The AI case is built and waits for the test predictions |
+| RO4 | AI torque + Moco | `assist.py` | **Done on mean SM strides.** Exo off, measured, AI, optimised. The LSTM's torque, replayed, gives the measured torque's effort (−1.4%, 15 participants, p = 0.36) |
 | RO5 | EMG-informed assistance | — | **Blocked.** No EMG in the public release. It exists for five participants; the authors have to be asked |
-| RO6 | Accuracy, tracking, cost, robustness | `stats.py` | Tables and tests are scripted; the at-scale run (single strides, ramps) is not started |
-| H1 | Personalised beats population | `evaluate.py`, `stats.py` | On validation: yes for every per-row model on the torque at the joint, in 18–19 of 19 participants. Test pending |
-| H2 | Gait phase helps | | On validation: yes, but little for a forest (4.4 vs 4.5 Nm). Test pending |
-| H3 | Locomotion mode helps | | On validation: small. Test pending |
+| RO6 | Accuracy, tracking, cost, robustness | `stats.py` | Tests and tables done for prediction and for mean strides; the at-scale run (single strides, ramps) is not started |
+| H1 | Personalised beats population | `evaluate.py`, `stats.py` | **Supported.** LSTM, walking: 2.36 vs 3.80 Nm, 19 of 19 participants, p = 3.8e-6 |
+| H2 | Gait phase helps | | **Supported, small for a strong model.** Random forest: 3.68 vs 4.02 Nm, 19 of 19, p = 3.8e-6 |
+| H3 | Locomotion mode helps | | **Supported, very small.** LSTM, all modes: 2.81 vs 2.95 Nm, 18 of 19, p = 7.6e-6 |
 | H4 | Optimised assistance lowers simulated effort | `assist.py` | **First result, 16 participants:** −34% against the measured torque at the same torque budget (16 of 16, p = 3.1e-5) |
 | H5 | EMG changes the allocation | — | Blocked with RO5 |
 
@@ -98,7 +98,11 @@ Numbers and how they were obtained are in `notes/observations.md` (sections "K2"
 - **The dataset's two torques are different things.** One is at the motor, one at the joint. Half
   the motor torque accelerates the motor's own rotor.
 - **So joint acceleration is the input that matters for the motor torque.** Adding it takes a
-  linear model's walking error from 15.4 to 8.9 Nm (validation).
+  linear model's walking error from 16.0 to 9.2 Nm, and helps every model in all 19 participants.
+- **Torque prediction.** A personalised LSTM predicts the torque at the joint to 2.4 Nm in
+  walking; for a person it has never seen, 4.0 Nm. Personalised beats population for every model.
+- **The AI torque stands in for the measured one.** Replayed in the twin, the LSTM's torque gives
+  the same muscle effort as the measured torque (−1.4%, not significant).
 - **Assistance in simulation (H4).** The measured torque lowers the model's muscle effort by 16%
   against the exoskeleton switched off; an optimised torque with the same budget lowers it by a
   further 34%.
@@ -125,7 +129,6 @@ Numbers and how they were obtained are in `notes/observations.md` (sections "K2"
 
 ## 8. Next
 
-1. The test pass for H1–H3, then the AI torque replayed in the twin.
-2. Scale the model to each participant (height and mass are published) and solve again.
-3. Single strides and ramps; the at-scale evaluation (K9), on the DGX if it is granted.
-4. EMG, if the authors release it. Otherwise RO5 and H5 are reported as not testable.
+1. Scale the model to each participant (height and mass are published) and solve again.
+2. Single strides and ramps; the at-scale evaluation (K9), on the DGX if it is granted.
+3. EMG, if the authors release it (asked 2026-11-11). Otherwise RO5 and H5 are reported as not testable.

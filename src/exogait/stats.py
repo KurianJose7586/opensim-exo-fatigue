@@ -110,6 +110,9 @@ def effort_tests():
     rows = [dict(hypothesis="h4", kind=kind, controller=c, a=x, b=y) | paired(d[f"effort_{x}"] if c == "SM" else d[x], d[f"effort_{y}"] if c == "SM" else d[y])
             for kind, c, d, x, y in (("primary", "SM", a, "optimised", "measured"), ("secondary", "SM", a, "optimised", "none"),
                                      ("secondary", "SM", a, "measured", "none"), ("secondary", "TR", tr, "measured", "none"))]
+    if (MOCO / "ai.csv").exists():   # K7's `ai` case: the LSTM's torque replayed. Expected: no different from `measured`
+        ai = pd.read_csv(MOCO / "ai.csv").drop_duplicates(["participant", "condition", "model"], keep="last").set_index("participant")
+        rows.append(dict(hypothesis="h4", kind="secondary", controller="SM", a="ai", b="measured") | paired(ai.effort_ai, ai.effort_measured))
     t = pd.DataFrame(rows)
     t["p_holm"] = np.where(t.kind == "primary", np.nan, holm(t.p.where(t.kind != "primary")))
     return t, a

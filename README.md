@@ -21,10 +21,10 @@ are the exoskeleton's torque. Simulation.*
 | Part | Code | State |
 |---|---|---|
 | Preprocessing and splits | `preprocess.py`, `split.py` | **Done**, all 19: 5,964 strides, whole-block train/val/test |
-| Torque models | `evaluate.py`, `lstm.py` | **Built.** Phase mean, ridge, random forest, bagged trees, LSTM. Scored on the validation blocks; the test blocks are being scored |
+| Torque models | `evaluate.py`, `lstm.py` | **Done.** Phase mean, ridge, random forest, bagged trees, LSTM, scored once on held-out test blocks. Personalised LSTM: 2.4 Nm in walking (R² 0.97 hip, 0.94 knee); for an unseen person 4.0 Nm |
 | The twin | `x2model.py`, `track.py` | **Reproduces walking** for all 19 in both controller modes (hip 0.6°, knee 0.4° median error), on a generic body |
-| Assistance in simulation | `assist.py` | **First result:** an optimised torque with the measured torque's budget lowers simulated muscle effort by 34% (16 of 16 participants). The AI-torque case is built, not yet run |
-| Statistics | `stats.py` | Scripted for H1–H4; final numbers follow the test pass |
+| Assistance in simulation | `assist.py` | **First result:** an optimised torque with the measured torque's budget lowers simulated muscle effort by 34% (16 of 16 participants). The AI's torque, replayed, matches the measured torque's effort (−1.4%) |
+| Statistics | `stats.py` | **Done** for H1–H4: all four supported; H2 and H3 are small effects for the strong models |
 | EMG | — | **Blocked:** not in the public dataset |
 
 Reports for the faculty are in [`docs/reports/`](docs/reports/). Every number and how it was

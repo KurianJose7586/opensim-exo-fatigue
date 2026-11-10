@@ -838,6 +838,83 @@ twin had to make up: its contact forces.
     the split), which would constrain the one thing the solve is free to invent. Not done.
 - `results/exogait/moco/load_split.csv` has a row per solve.
 
+### K3 and J7: the test blocks, scored once (`evaluate.py --test`, `stats.py test`, 2026-11-11)
+
+Every model was refitted on train + val and scored on the test blocks, all 19 participants. Model
+choices and the primary endpoints were fixed on the validation blocks first. Tables:
+`results/exogait/stats/test_*.csv`; figures: `figures/exogait/test_*.png`.
+
+- **RMSE in Nm, full inputs** (the mean over participants, controllers and joints):
+
+  | Torque | Scheme | Model | walk | ramp up | ramp down | stairs up | stairs down |
+  |---|---|---|---|---|---|---|---|
+  | gauge | personalised | phase mean | 7.7 | 8.4 | 8.7 | 7.4 | 10.2 |
+  | gauge | personalised | ridge | 6.5 | 7.3 | 7.4 | 9.3 | 10.3 |
+  | gauge | personalised | random forest | 3.8 | 4.5 | 4.7 | 4.5 | 6.5 |
+  | gauge | personalised | LSTM | 2.4 | 2.9 | 3.0 | 3.0 | 4.0 |
+  | gauge | population | phase mean | 9.9 | 10.0 | 10.5 | 9.3 | 11.8 |
+  | gauge | population | ridge | 7.9 | 8.2 | 8.4 | 10.2 | 11.0 |
+  | gauge | population | random forest | 5.5 | 5.8 | 5.9 | 5.7 | 7.5 |
+  | gauge | population | LSTM | 4.0 | 4.3 | 4.4 | 4.3 | 5.0 |
+  | motor | personalised | ridge | 8.9 | 9.9 | 9.9 | 10.7 | 11.1 |
+  | motor | personalised | random forest | 6.2 | 7.3 | 7.4 | 6.7 | 8.4 |
+  | motor | personalised | LSTM | 4.8 | 5.4 | 5.6 | 4.8 | 5.6 |
+  | motor | population | ridge | 9.7 | 10.5 | 10.5 | 11.2 | 11.5 |
+  | motor | population | random forest | 7.1 | 7.8 | 8.1 | 7.0 | 8.8 |
+  | motor | population | LSTM | 5.8 | 6.3 | 6.5 | 5.6 | 6.3 |
+
+  Bagged trees are within 0.2 Nm of the random forest. The motor torque's phase mean is 15–18 Nm.
+- **Walking R² (median; hip, knee), gauge torque:** LSTM 0.97, 0.94 personalised and 0.92, 0.86
+  population; random forest 0.90, 0.89 and 0.81, 0.76; ridge 0.72, 0.65 and 0.62, 0.49. Motor
+  torque, LSTM: 0.92, 0.95 and 0.89, 0.92. Walking nRMSE of the personalised LSTM: 0.028 (gauge).
+- **H1, primary** (LSTM, gauge torque, walking, per participant): personalised 2.36 vs
+  population 3.80 Nm, lower in 19 of 19, p = 3.8e-6, r = 1.00. The personalised LSTM is the
+  population model fine-tuned on the participant's blocks (a median of 67 epochs; never zero).
+  Every other model agrees (18–19 of 19 on both torques). Of 219 secondary comparisons, 137 are
+  significant after Holm, none against the hypothesis.
+- **H2, primary** (random forest, personalised, gauge, walking): with phase 3.68 vs without
+  4.02 Nm, 19 of 19, p = 3.8e-6, r = 1.00. Secondary: 238 of 351 significant, none against. The
+  size depends on the model: 7.6 vs 11.9 Nm for the phase mean, 6.5 vs 7.2 for ridge, 0.3 Nm for
+  a forest, which can read phase off the other inputs.
+- **H3, primary** (LSTM, personalised, gauge, all five modes): with mode 2.81 vs without
+  2.95 Nm, 18 of 19, p = 7.6e-6, r = 0.99. Consistent but small: 0.14 Nm. Secondary: 66 of 439
+  significant, none against. Only the phase mean needs the mode (7.8 vs 9.3 Nm).
+- **Acceleration (exploratory):** lower with it in 19 of 19 for every model that can use it, on
+  both torques. Motor torque, walking, personalised: ridge 9.2 vs 16.0 Nm, random forest 6.1 vs
+  9.9, LSTM 4.9 vs 5.3. The LSTM needs it least: it sees the velocity sequence.
+- **Validation flattered nothing:** test errors are at or below the validation ones (the final
+  models are fitted on two thirds of the data, not one).
+- **Cost.** Inference per stride: 0.04 ms (phase mean), 0.07 (ridge), 0.3 (LSTM, GPU), 0.5–0.6
+  (forests). The test pass took 2 h 10 min for the per-row models (8 threads) and about 1 h 20 min
+  for the LSTM.
+- **One crash.** The LSTM's test run died without a message after two participants (exit code 1,
+  no traceback). The rest ran one process per participant with no failure. Not explained.
+- **The per-row models' prediction files** (`<model>_<ID>_pred.csv` of phase mean, ridge, rf,
+  bag) carry `t` to 6 significant digits only: they were written before the writer was fixed.
+  Join on `stride, phase` to the strides file for the clock, as `assist.ai_torque()` does. The
+  LSTM's files are exact.
+
+### K7: the AI torque replayed in the twin (`assist.py ai`, 2026-11-11)
+
+The personalised LSTM's predicted joint-output torque on the test strides (SM walking), averaged
+onto the right-heel-strike stride for the four actuators, replaces the measured torque in K5's
+solve. Two starts, as for `measured`. 16 participants; `results/exogait/moco/ai.csv`.
+
+- **The predicted mean torque is 1.2 Nm RMS off the measured one** on the same strides (median;
+  0.7–1.9), over 4–23 test strides per participant.
+- **Replayed, it gives the same effort as the measured torque:** −1.4% (median; −4.2 to +5.4%),
+  lower in 9 of 15, Wilcoxon p = 0.36. So in simulation the AI torque layer stands in for the
+  measured assistance (RO4).
+- **HL03 is out:** its solve converged (effort 0.492 against 0.516 measured) but the replayed
+  torque is 1.2 Nm RMS off the prescribed one at the hips, over K5's 1 Nm check. The check was
+  not loosened. HL03's `measured` solve sits at 0.87 Nm: 50 mesh intervals are coarse for it.
+- The test strides' measured mean differs from K5's all-clean-strides mean by 2.3 Nm RMS
+  (1.5–5.5): the stride selection matters more than the model's error.
+- The `ai` path was checked first: handed the measured torque it reproduces the `measured`
+  solve (objective 1.01936 vs 1.01941).
+- J7's H4 numbers on absolute effort: optimised vs measured 0.268 vs 0.438 (16 of 16, p =
+  3.1e-5); measured vs exo off p = 0.011 (the report's 0.0092 was on percent changes).
+
 ---
 
 ## Open questions

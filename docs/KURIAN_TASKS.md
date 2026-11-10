@@ -96,11 +96,11 @@ with `src/fatigue` on `sys.path`).
 |---|---|---|---|---|
 | K1 | Environment and data | — | M | **done** (PR #6, approved, not merged). MATLAB part dropped. Env rebuilt 2026-11-10, with CUDA torch |
 | K2 | Preprocessing at scale (RO1) | J3 (preprocess); J4 (`split.py`, for the last done-when bullet) | L | **done** 2026-11-10, with J3–J5: all 19 processed and split, baselines scored on val |
-| K3 | Nonlinear torque models (RO2, H1–H3) | K2, J4, J5 | L | todo: next |
+| K3 | Nonlinear torque models (RO2, H1–H3) | K2, J4, J5 | L | **done** 2026-11-11: forests and LSTM, val then one test pass (`notes/observations.md`, "K3 and J7"). GPR and GRU (optional) not run |
 | K4 | OpenSim model and X2 mapping (RO3) | K1, J2 | L | **in progress**: model, mapping and torque sign done; Jasith's plot check left |
 | K5 | MocoTrack: reproduce the gait | K4 | L | **walking done** on mean strides, all 19 × SM/TR. Single strides (need J3) and ramps left |
 | K6 | Personalised twin state (Layer 4) | K5; J1b (soft: generic anthropometry is the default) | M | **done** on mean walking strides, on a generic body. Mass and height are published (J1b): scaling the model is next |
-| K7 | AI + Moco integration (RO4, H4) | K3, K5, K6, J1 Q5 | L | **in progress**: `none`, `measured`, `optimised` done on mean SM strides (16 participants). `ai` waits for K3 |
+| K7 | AI + Moco integration (RO4, H4) | K3, K5, K6, J1 Q5 | L | **done on mean SM strides**: `none`, `measured`, `optimised` (16 participants), `ai` (15). Single strides left |
 | K8 | Assist-as-needed controller with EMG (Layer 6, H5) | K7, J6 | L | **blocked**: no EMG (J1 Q8). Closes as not possible if none by 2026-12-01 |
 | K9 | RO6 evaluation at scale | K3, K7 (K8 if EMG) | L | todo |
 
