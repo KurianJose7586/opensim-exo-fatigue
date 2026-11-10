@@ -609,6 +609,94 @@ muscles**: it is the kinematics-only OpenSense copy. A muscled Rajagopal model h
   3–5 such solves. A full SM comparison took 10–20 minutes per participant, three at a time, and
   the two second starts another 5–10.
 
+### K2 with J3–J5: strides, splits and baselines on all 19 (`preprocess.py`, `split.py`, `evaluate.py`, 2026-11-10)
+
+Kurian took J3–J5 over (`decisions.md`, 2026-11-10). All numbers below are from all 19 files.
+
+- **Strides.** 9,697 detected (heel strike to heel strike, with at least one row in a labelled
+  condition), **5,964 kept**: 220 (AB78) to 458 (AB79) per participant.
+
+  | Dropped for | Strides |
+  |---|---|
+  | crossing a label change (into a turn, a transition, another pass) | 2,237 |
+  | marked incomplete by the dataset (`step_complete` False) | 1,399 |
+  | outlier duration (outside 0.5–1.5 of the median complete stride) | 75 |
+  | sampling holes (one over 50 ms, or over 20% of samples missing) | 22 |
+  | crossing a removed rest; a dt ≤ 0 inside | 0; 0 |
+
+  - Every removed rest and every dt ≤ 0 sits among `UNDEFINED` rows, so a stride that touches
+    one already fails the label rule. The two rules stay in the code.
+  - **What `step_complete` False means.** Looked at on AB68, HL03, AB72, AB82 and HL05 (2,034
+    candidates inside one block). It marks the first stride of most passes (9–39 per
+    participant: a normal duration, one heel strike of the other leg) and the phase wraps while
+    standing (0.1–0.5 of a stride long, mostly with no heel strike of the other leg). The 1,618
+    strides it calls complete are real: one heel strike of the other leg in each (two in 7 of
+    HL05's), and none shorter than half the median.
+  - Durations of the complete strides: 1,546 of 1,618 within 0.75–1.25 of the median, 30 below
+    0.75, 25 in 1.25–1.5, 17 above 1.5 (pauses, up to 2.4 times). Kept strides last 1.3–11.4 s
+    (median 3.2 s; 99% under 6.4 s; the long ones are stairs).
+  - Sampling holes: single dropped samples are everywhere in the AB files (6.6% of AB68's
+    intervals), and holes reach 33 ms routinely. In the kept strides the worst hole is 45 ms and
+    the most missing 19.7%. The 22 dropped strides are in AB76 and AB78 (11 each).
+- **The clock restarts in five files.** `time` steps backwards once in AB69 (−114 s), AB72
+  (−1,230 s), AB80 (−1,309 s) and AB82 (−1,347 s), and three times in AB76 (−999, −1,705,
+  −109 s), each time between two `UNDEFINED` rows, and then runs over the same seconds again.
+  This is what J2's "1–3 dt ≤ 0 in AB69/72/76/80/82" was. The HL files' 33 dt ≤ 0 are repeated
+  time stamps. So `t` does not order a session. `split.py`'s self-check found it: 16 of AB72's
+  test strides "overlapped" training strides in time. Strides and blocks are now numbered by raw
+  row, each stride carries `row_start, row_end`, and the overlap check runs on rows.
+- **Stuck gauge.** AB82's left-knee gauge is constant in 94 kept left strides (SM walking 36,
+  SM ramps 17 + 12, TR ramps 15 + 14), as K5 found on the mean strides. It is written as NaN.
+  No other channel is stuck: the smallest movement of a live gauge over a kept stride is 10 Nm
+  (knee) and 19 Nm (hip), against a 0.5 Nm threshold.
+- **Kept strides per condition** (both legs; minimum, median, maximum over participants):
+
+  | | SM | TR |
+  |---|---|---|
+  | walk | 42, 81, 139 | 47, 71, 139 |
+  | ramp up | 13, 23, 43 | 8, 20, 34 |
+  | ramp down | 14, 27, 45 | 6, 24, 35 |
+  | stairs up | 13, 15, 21 | 10, 15, 20 |
+  | stairs down | 0, 14, 22 | 6, 12, 17 |
+
+  AB80 has no kept stride on SM stairs down (4 detected per leg, all crossing a label change).
+- **Blocks and splits.** A condition has three blocks in 132 of the 190 participant × mode ×
+  controller cells, five in 35 (walking), four in 12, two in 7, one in 2 (AB79's TR ramps), seven
+  in 1. A block holds 1–33 strides (median 7). So whole-block splits fall into thirds: 35.8%
+  of the strides train, 31.3% val, 32.8% test, not the planned 60/20/20. Seven conditions have
+  no val block; three have no personalised test (AB79's two TR ramps, AB80's SM stairs down).
+  Test strides per condition (median): walk 23–26, ramps 7–8, stairs 4–5.
+- **Size and time.** 134 MB for all 19 (5–11 MB each). `preprocess.py all` takes 80 s,
+  `split.py` 2 s, the two baselines on the val blocks 57 s (456 fits each).
+- **Baselines on the validation blocks** (full inputs; RMSE in Nm, the mean over participants,
+  controllers and joints). These are not the test numbers: the test blocks wait for the final pass.
+
+  | Torque | Model | Scheme | walk | ramp up | ramp down | stairs up | stairs down |
+  |---|---|---|---|---|---|---|---|
+  | gauge | phase mean | personalised | 8.0 | 8.7 | 9.1 | 8.2 | 11.0 |
+  | gauge | phase mean | population | 10.1 | 9.9 | 10.6 | 9.5 | 11.5 |
+  | gauge | ridge | personalised | 7.5 | 8.3 | 8.1 | 10.5 | 10.9 |
+  | gauge | ridge | population | 8.8 | 9.4 | 9.3 | 11.3 | 11.7 |
+  | motor | phase mean | personalised | 16.4 | 17.8 | 18.4 | 15.8 | 18.4 |
+  | motor | phase mean | population | 17.8 | 18.0 | 18.5 | 15.5 | 17.3 |
+  | motor | ridge | personalised | 15.4 | 15.5 | 15.9 | 14.9 | 16.0 |
+  | motor | ridge | population | 15.9 | 16.0 | 16.3 | 15.1 | 16.2 |
+
+  - Walking R² (median; hip, knee): gauge torque 0.48, 0.58 (personalised phase mean) and 0.56,
+    0.60 (personalised ridge). Motor torque 0.14, 0.37 and 0.18, 0.48. nRMSE is 0.08–0.12.
+  - **The motor torque is the hard target, and K6 says why.** About half of it is the rotor's
+    inertia times the joint acceleration, and acceleration is not an input: the baselines see
+    angle and velocity at one instant. Their hip R² is under 0.2. A model that sees acceleration
+    (a derived input, or a sequence model) should do much better. That is the first thing to try
+    in K3.
+  - Directions on val, walking, per participant (both controllers and joints pooled), ridge on
+    the gauge torque: personalised 7.7 vs population 8.8 Nm (lower in 19 of 19); with phase 7.7
+    vs without 8.9 (19 of 19); with mode 7.7 vs without 7.9 (19 of 19). On the phase mean the
+    mode input matters on stairs, not on walking (stairs up 8.2 vs 11.1 Nm without it), so H3's
+    endpoint cannot be walking alone (J7).
+  - Ridge's alpha does not matter: val RMSE is the same to 0.1% for 0.01–100.
+  - Inference: 0.04–0.06 ms per stride.
+
 ---
 
 ## Open questions

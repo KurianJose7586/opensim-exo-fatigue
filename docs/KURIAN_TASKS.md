@@ -24,8 +24,8 @@ scipy.signal · 3A scikit-learn, PyTorch · 3B–6 the OpenSim/Moco Python API.
 
 | | Objective / hypothesis | Owner |
 |---|---|---|
-| RO1 | Reproducible preprocessing pipeline for ExoGait | Jasith builds (J3), Kurian runs at scale (K2) |
-| RO2 | Participant-specific AI models for exo torque | Both (baselines Jasith J5, nonlinear Kurian K3) |
+| RO1 | Reproducible preprocessing pipeline for ExoGait | Kurian (J3 and K2, since 2026-11-10); Jasith reviews |
+| RO2 | Participant-specific AI models for exo torque | Kurian (baselines J5, nonlinear K3); Jasith reviews |
 | RO3 | Participant-informed OpenSim simulation | Kurian (K4–K6) |
 | RO4 | AI torque layer + Moco, offline optimisation | Kurian (K7) |
 | RO5 | EMG features inform assistance modulation (not fatigue) | Jasith features (J6), Kurian simulation (K8). Blocked: no EMG |
@@ -94,8 +94,8 @@ with `src/fatigue` on `sys.path`).
 | ID | Task | Depends on | Size | Status |
 |---|---|---|---|---|
 | K1 | Environment and data | — | M | **done** (PR #6, approved, not merged). MATLAB part dropped. Env rebuilt 2026-11-10, with CUDA torch |
-| K2 | Preprocessing at scale (RO1) | J3 (preprocess); J4 (`split.py`, for the last done-when bullet) | L | todo |
-| K3 | Nonlinear torque models (RO2, H1–H3) | K2, J4, J5 | L | todo |
+| K2 | Preprocessing at scale (RO1) | J3 (preprocess); J4 (`split.py`, for the last done-when bullet) | L | **done** 2026-11-10, with J3–J5: all 19 processed and split, baselines scored on val |
+| K3 | Nonlinear torque models (RO2, H1–H3) | K2, J4, J5 | L | todo: next |
 | K4 | OpenSim model and X2 mapping (RO3) | K1, J2 | L | **in progress**: model, mapping and torque sign done; Jasith's plot check left |
 | K5 | MocoTrack: reproduce the gait | K4 | L | **walking done** on mean strides, all 19 × SM/TR. Single strides (need J3) and ramps left |
 | K6 | Personalised twin state (Layer 4) | K5; J1b (soft: generic anthropometry is the default) | M | **done** on mean walking strides. Mass and height wait for J1b |
@@ -119,21 +119,30 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
 - **CUDA torch is in** (2.14.1+cu126): `torch.cuda.is_available()` is True on the RTX 2050.
   torch and opensim stay in separate processes (Shared rules), so no one-process test was run.
 
-### K2 — Preprocessing at scale (RO1)
+### K2 — Preprocessing at scale (RO1) · done
 
-- **Code:** J3's `src/exogait/preprocess.py`, then J4's `src/exogait/split.py`. Fixes that scale
-  needs go back through a PR that Jasith reviews.
-- **Run:** `micromamba run -n opensim python -u src/exogait/preprocess.py all` as soon as J3
-  lands, and `split.py all` once J4 lands. Sequential is fine: about a minute per participant to
-  read with `usecols`, as `checks.py` does. One participant in memory at a time, only the
-  needed columns.
+- **Done 2026-11-10**, together with J3–J5, which Kurian took over (`notes/decisions.md`). The
+  rules are in the docstrings of `preprocess.py` and `split.py`; the numbers are in
+  `notes/observations.md`, "K2".
+  - 9,697 strides detected, **5,964 kept** (220–458 per participant). Dropped: 2,237 cross a
+    label change, 1,399 are marked incomplete by the dataset, 75 have an outlier duration, 22
+    have sampling holes.
+  - 134 MB for all 19 (5–11 MB each), in 80 s. `split.py` takes 2 s and its self-check passes.
+  - Splits are thirds, not 60/20/20: most conditions have three blocks.
+- **Code:** `src/exogait/preprocess.py`, then `src/exogait/split.py`. Changes go through a PR
+  that Jasith reviews.
+- **Run:** `micromamba run -n opensim python -u src/exogait/preprocess.py all`, then
+  `split.py` (no arguments: every participant on disk). About 4 s per participant, read with
+  `usecols`. One participant in memory at a time, only the needed columns.
   - **`time` stays float64.** The raw clock runs to 1,234–4,855 s, where float32 resolves only
     0.12–0.49 ms: it turns 0–33 real dt ≤ 0 per file into up to 1,238. float32 only for angle,
     velocity and torque columns.
 - **Known traps (J2, checked on all 19):** AB82's left-knee gauge torque is stuck at −12.07 Nm
-  in SM walking, SM ramps and TR ramps (K5); AB72's column order; every HL file (33 dt ≤ 0 each,
-  `*_UNDEFINED2` labels); 1–3 dt ≤ 0 in AB69/72/76/80/82; removed rests up to 352 s; two sites
-  (Chicago and Madrid) with different stairs and ramps.
+  in SM walking, SM ramps and TR ramps (written as NaN, flagged `gauge_stuck`); AB72's column
+  order; every HL file (33 duplicated time stamps each, `*_UNDEFINED2` labels); **the clock
+  restarts** once to three times in AB69/72/76/80/82 and runs over the same seconds again, so
+  strides are ordered by raw row, not by `t`; removed rests up to 352 s; two sites (Chicago and
+  Madrid) with different stairs and ramps.
 - **In:** `data/raw/exogait/*.csv`, read only.
 - **Out:** `data/processed/exogait/`: `<ID>_strides.csv`, `<ID>_stride_features.csv` and
   `<ID>_excluded.csv` for all 19, plus `summary.csv`, `splits.csv` and `split_counts.csv`.
@@ -224,8 +233,9 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
     impedance law, on all 19.
   - Target = the mean of the clean strides of one participant × condition, right heel strike to
     right heel strike, made periodic with its mean kept. `BackPackAngle` strides the gyro does
-    not confirm are dropped from `pelvis_tilt` and c only. Once `preprocess.py` lands,
-    `x2model.py` imports its stride function and drops its own.
+    not confirm are dropped from `pelvis_tilt` and c only. The heel-strike rule is
+    `preprocess.heel_strikes()`, imported here. K4's stricter filters (steady strides only) stay
+    in `x2model.strides()`: a mean stride for Moco wants less than the torque models do.
   - The ankle is not in the target. K5 tracks the stock reference ankle at weight ≤ 0.01 (the
     J1 Q7 default; at 0.1 the trial ankle followed it to 0.4°, i.e. imposed) or leaves it free,
     with bounds widened to ±30°.
@@ -423,13 +433,13 @@ Processed data goes in `data/processed/exogait/` (gitignored, shared as a zip). 
 | File | Written by | One row per | Columns |
 |---|---|---|---|
 | `<ID>_strides.csv` | J3, K2 | stride × phase point (101 per stride) | see below |
-| `<ID>_stride_features.csv` | J3, K2 | kept stride | key columns, duration, ROM, peak and RMS torque per joint. Descriptive only, never model inputs |
-| `<ID>_excluded.csv` | J3, K2 | dropped stride | `participant, leg, condition, t_start, t_end, reason` |
+| `<ID>_stride_features.csv` | J3, K2 | kept stride | key columns, `row_start, row_end` (the two heel strikes as raw rows, 0-based), `t_start, t_end, duration, max_dt, missing, gauge_stuck`, ROM, peak and RMS torque per joint (motor and gauge). Descriptive only, never model inputs |
+| `<ID>_excluded.csv` | J3, K2 | dropped stride | `participant, leg, condition, row_start, row_end, t_start, t_end, reason` (the first rule that failed) |
 | `summary.csv` | K2 | participant × mode × controller × leg | `detected, kept`, one count column per exclusion reason |
-| `splits.csv` | J4 (AB68 + HL03), K2 (all 19) | stride | `participant, stride, block, split` (train/val/test) |
-| `split_counts.csv` | J4 (AB68 + HL03), K2 (all 19) | participant × mode × controller | blocks and strides per split, `personalised` (False under 2 blocks) |
-| `predict/<model>.csv` | J5, K3 | model × scheme × ablation × participant × mode × controller × joint × split | `rmse, mae, r2, nrmse, infer_ms` (per stride), `n_strides, host, commit` |
-| `predict/<model>_<ID>_pred.csv` | K3 | stride × phase point | `participant, stride, leg, scheme, ablation, phase, t, hip_tau_pred, knee_tau_pred` (test strides only) |
+| `splits.csv` | J4, K2 (all 19) | stride | `participant, stride, block, split` (train/val/test) |
+| `split_counts.csv` | J4, K2 (all 19) | participant × mode × controller | blocks and strides per split, `personalised` (False under 2 blocks) |
+| `predict/<model>.csv` | J5, K3 | model × scheme × ablation × torque (motor/gauge) × participant × mode × controller × joint × split (val/test) | `rmse, mae, r2, nrmse, infer_ms` (per stride), `n_strides, n_train_strides, host, commit`. A re-run replaces its rows |
+| `predict/<model>_<ID>_pred.csv` | J5, K3 (`--test` only) | stride × phase point × scheme | `participant, stride, leg, mode, controller, phase, t, scheme, ablation` (full), `hip_tau_pred, knee_tau_pred, hip_tau_gauge_pred, knee_tau_gauge_pred` (test strides only) |
 | `model/2D_gait_x2.osim` | K4 | — | OpenSim model |
 | `coords/<ID>_<stride>.sto` | K4 | time point | model coordinate names, radians |
 | `moco/<ID>_<condition>_mean_<case>_m<mesh>.sto` | K5, K7, K8 | — | MocoTrajectory of a mean stride. Single strides later: `<ID>_<stride>_<case>` |
@@ -445,19 +455,21 @@ Processed data goes in `data/processed/exogait/` (gitignored, shared as a zip). 
 - **Key:** `participant`, `group` (AB/HL; a site label by default, J1 Q12), `stride` (unique
   within participant), `leg` (L/R), `mode` (walk/ramp_up/ramp_down/stairs_up/stairs_down),
   `controller` (TR/SM), `block` (one continuous pass of one condition: J3's rule), `phase`
-  (0–100), `t` (s, float64).
+  (0–100), `t` (s, float64: the raw clock, good inside a stride only, since five files restart
+  it). Strides and blocks are numbered in file order.
 - **Inputs:** `hip_q, knee_q, hip_qd, knee_qd` (stride leg), `hip_q_other, knee_q_other,
   hip_qd_other, knee_qd_other` (other leg, same instants), `backpack_q, backpack_qd`.
-- **Also inputs (from Key):** `phase` (H2), `mode` (H3), `controller` (Q2 default), `group`.
-  Final list in J4's `ALLOWED`.
+- **Also inputs (from Key):** `phase` (H2), `mode` (H3), `controller` (Q2 default), `group`,
+  `leg`. The list is `ALLOWED` in `split.py`, with reasons in `docs/model_inputs.md`.
 - **Pending J1 Q11 (online?):** `gait_state` (`gait_state_<leg>`) and `stance_alpha`
   (`StanceInterpolationFactor`). Both encode phase, so H2's no-phase arm drops them too.
 - **Pending J1 Q3:** `hip_sm_k, hip_sm_d, hip_sm_q0, hip_sm_qd0`, and the same four for the
   knee.
-- **Targets:** `hip_tau, knee_tau` (`JointTorques`). `hip_tau_gauge, knee_tau_gauge` are the
-  candidate target of J1 Q9, never an input.
-- **Replay only, never inputs:** `hip_tau_other, knee_tau_other` (the other leg's measured
-  torque, for K5's `measured` case).
+- **Targets:** `hip_tau, knee_tau` (`JointTorques`, motor side) and `hip_tau_gauge,
+  knee_tau_gauge` (the torque at the joint; J1 Q9). Modelled separately, never inputs. A stuck
+  gauge channel is NaN.
+- **Replay only, never inputs:** `hip_tau_gauge_other, knee_tau_gauge_other` (the other leg's
+  joint torque, for K5's `measured` case, which replays the gauge torque).
 - **Not carried at all:** desired torque, the three interaction-force families, `step_number_*`
   (a session counter), `SM_Gui_Parameter`, `SmoothedStanceInterpolationFactor`.
 
@@ -480,7 +492,7 @@ participant P:
 - scores P's `test` blocks, the same strides its personalised model is scored on, so H1 is
   paired.
 
-This is the default; J4 may change it.
+`evaluate.py` implements exactly this.
 
 ## Handoffs
 
@@ -488,10 +500,10 @@ This is the default; J4 may change it.
 |---|---|---|---|
 | Jasith J1b | K6 | Per-participant mass and height, or "none published" | `notes/observations.md` |
 | Jasith J2 | K4 | Column meanings, units, signs, condition labels | `docs/exogait_data.md` (PR #7) |
-| Jasith J3 | K2 | Preprocessing code tested on AB68 + HL03 | `src/exogait/preprocess.py` |
-| Jasith J4 | K2, K3 | Splits, leakage self-check, allowed inputs | `split.py` (`ALLOWED`), `splits.csv` and `split_counts.csv` (AB68 + HL03), `docs/model_inputs.md` |
-| Jasith J5 | K3 | Metric function, results format, ablation loop | `src/exogait/evaluate.py` |
-| K2 | Jasith J5 (and J4 for review) | Processed data and splits, all 19 | `data/processed/exogait/` (zip, outside git) |
+| J3 (Kurian) | K2 | Preprocessing code, run on all 19 | `src/exogait/preprocess.py` |
+| J4 (Kurian) | K2, K3 | Splits, leakage self-check, allowed inputs | `split.py` (`ALLOWED`), `splits.csv` and `split_counts.csv`, `docs/model_inputs.md` |
+| J5 (Kurian) | K3 | Metric function, results format, ablation loop | `src/exogait/evaluate.py` |
+| K2 | Jasith (review, J7) | Processed data and splits, all 19 | `data/processed/exogait/` (134 MB; regenerate with `preprocess.py all`, or a zip outside git) |
 | K3 | K7 | Predicted torque on test strides | `predict/<model>_<ID>_pred.csv` |
 | Jasith J6 | K8 | Per-stride EMG features | `<ID>_emg.csv` |
 | K3, K9 | Jasith J7 | Results for statistics and figures | `predict/*.csv`, `moco/summary.csv`, `ro6/`, `split_counts.csv` |
@@ -501,9 +513,9 @@ This is the default; J4 may change it.
 
 1. **Now:** merge the open PRs (#6, #7, #8, #9, then the K5–K7 one). Ask the supervisors for
    DGX access (K9 at full scale). K4 waits only on Jasith's plot check.
-2. Run K2's preprocessing as soon as J3 lands; run `split.py` on all 19 once J4 lands; then K3.
-   **This is the critical path: K3, K7's `ai` case and K9 all wait on J3, J4 and J5.**
-3. K5 on single strides (needs J3's strides file) and on ramps (tilted floor). K7's `ai` case
+2. **Done 2026-11-10:** J3–J5 and K2. **Next: K3**, on the validation blocks. The test blocks
+   are scored once, in one final `--test` pass for every model.
+3. K5 on single strides (the strides file is there now) and on ramps (tilted floor). K7's `ai` case
    once K3 has predictions.
 4. K9. K8 when EMG arrives; if none by 2026-12-01, K8 closes as not possible.
 

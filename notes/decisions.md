@@ -456,3 +456,41 @@ the 14 TR pairs the largest change was 5%.
   comparison is conservative for H4.
 - **Next:** a proper multi-start (several starts for every case, the best kept) before any
   effort number is reported as final. It roughly doubles K9's solve count.
+
+### 2026-11-10: Kurian takes J3–J5; the stride, split and scoring rules
+
+**Why.** J3, J4 and J5 had not been started, and K2, K3, K7's `ai` case and K9 all waited on
+them. Kurian asked his side to do them. They are in one PR for Jasith to review. `docs/JASITH_TASKS.md`
+keeps the plan as written and says what was built.
+
+**Stride rules** (`preprocess.py`). Chosen from the data, on five participants first, then
+checked on all 19 (`observations.md`, "K2"):
+- **Complete strides only.** The dataset's own `step_complete` flag decides. It removes the
+  first stride of a pass and the phase wraps while standing. Rejected: a duration rule alone
+  (it cannot tell a first stride from a steady one), and K4's stricter filters (toe-off timing,
+  bout edges, the gyro check), which are for a clean mean stride and would cost the models data.
+- **Duration within 0.5–1.5 of the median complete stride** of that participant, condition and
+  leg. 99% of complete strides are inside 0.70–1.50; the rest are pauses.
+- **Sampling holes:** a stride goes only for a hole over 50 ms (about one phase point of a slow
+  stride) or over 20% missing. Single dropped samples are everywhere and harmless at 101 points.
+- **Order by raw row, not by `t`**: the clock restarts in five files.
+- **A stuck gauge is NaN**, not a dropped stride: the stride's other channels are fine.
+- **The other leg's gauge torque is carried, not its motor torque**: K5 replays the gauge torque.
+
+**Splits** (`split.py`). The rule is the planned one (whole blocks, the last to test, the ones
+before to val). With three blocks per condition it gives thirds, not 60/20/20. Kept: one block
+each is the only whole-block split of three blocks, and the final models are refitted on train +
+val (two thirds) before the test blocks are scored.
+
+**Scoring** (`evaluate.py`).
+- **Two torques, fitted separately** (`motor`, `gauge`), per J1 Q9's default. One four-output fit
+  was rejected: a tree's splits would trade one torque off against the other, and AB82's NaN
+  gauge rows would have to leave the motor fit too.
+- **`leg` is an input**, and the phase mean is keyed on it. Each gauge channel has its own
+  offset of a few Nm, so a model that cannot tell left from right carries that as error.
+- **nRMSE = RMSE / the range of the measured torque** over all that participant's strides in
+  that mode, both controllers, so SM and TR share a scale.
+- **The test blocks are not scored yet.** Everything so far is on val. One `--test` pass scores
+  every model, the baselines included, after K3's choices are made on val.
+- The self-check writes to `predict/selfcheck/`: a population model depends on who is on disk,
+  so a two-participant run must not overwrite the real rows.

@@ -8,6 +8,12 @@ college has no MATLAB licence (`notes/decisions.md`). Kurian's half is in
 - the shared rules, including the one env recipe;
 - what is parked.
 
+> **2026-11-10: Kurian took J3, J4 and J5 over** (code and runs, on all 19), because K2, K3,
+> K7's `ai` case and K9 were waiting on them (`notes/decisions.md`). They are done, in one PR.
+> **Jasith: please review that PR** (the stride rules in `preprocess.py`'s docstring, the split
+> rule, `docs/model_inputs.md`) and K4's plot. Still open on this list: J1, J1b, J7, J8, J9.
+> Kurian's side picks up J7–J9 next unless Jasith has started them: say so on the PR.
+
 ## Why the split looks like this
 
 Jasith's laptop cannot sustain long heavy runs. **Kurian takes everything compute-heavy**:
@@ -50,9 +56,9 @@ Jasith takes work that runs on one or two participants or on already-processed d
 | J1 | Mentor alignment: Python notice + questions | — | S | todo: send now |
 | J1b | Paper check: per-participant body mass and height | — | S | todo: now |
 | J2 | Dataset study | — | M | **done**: `docs/exogait_data.md`, PR #7 (approved, not merged) |
-| J3 | Preprocessing code (RO1) | J2 | L | todo |
-| J4 | Splits and leakage audit | J2, J3 | M | todo |
-| J5 | Baselines and shared metrics (RO2) | J3, J4; K2 for the full run | M | todo |
+| J3 | Preprocessing code (RO1) | J2 | L | **done** by Kurian, 2026-11-10 (all 19). Jasith reviews |
+| J4 | Splits and leakage audit | J2, J3 | M | **done** by Kurian, 2026-11-10. Jasith reviews |
+| J5 | Baselines and shared metrics (RO2) | J3, J4; K2 for the full run | M | **done** by Kurian, 2026-11-10, scored on val. The `--test` pass waits for K3 |
 | J6 | EMG features (RO5) | J3 | M | **blocked**: no EMG (Q8). Closes as not possible if none by 2026-12-01 |
 | J7 | Statistics and figures (H1–H4, RO6) | J5, K3, K9 | M | todo |
 | J8 | Realign the docs and remove MATLAB | J1 (only for the title) | M | todo: the MATLAB part can go now |
@@ -87,7 +93,18 @@ which carries the SM units; Q4, Q8, Q9; Q11 for `gait_state` and the stance fact
 vs HL) and to K4 (the hip zero offset, and the torque sign, which J2 did not cover). The
 interaction-force units do not matter: those columns are not carried.
 
-### J3 — Preprocessing code (RO1)
+### J3 — Preprocessing code (RO1) · done (Kurian, 2026-11-10)
+
+**As built** (`preprocess.py`'s docstring has every rule; numbers in `notes/observations.md`, "K2"):
+- Drop rules, first that applies: `condition_change`, `gap`, `time_not_increasing`,
+  `incomplete` (the dataset's own `step_complete` flag), `duration_outlier` (outside 0.5–1.5 of
+  the median complete stride), `dropped_samples` (a hole over 50 ms or over 20% missing).
+- **The clock restarts in five files**, so strides and blocks are numbered by raw row and each
+  stride carries `row_start, row_end`. A clock restart also starts a new block.
+- AB82's stuck left-knee gauge is written as NaN and flagged `gauge_stuck`.
+- The other leg's **gauge** torque is carried for K5's replay, not its motor torque.
+
+The plan as it was written:
 
 - **Code:** `src/exogait/preprocess.py`. Developed and tested on AB68 + HL03 on the laptop;
   Kurian runs it on all 19 (K2). CLI as in `checks.py`:
@@ -131,7 +148,13 @@ interaction-force units do not matter: those columns are not carried.
 - **Done when** it runs on AB68 and HL03 with the self-check passing, and the PR is merged after
   Kurian's review.
 
-### J4 — Splits and leakage audit
+### J4 — Splits and leakage audit · done (Kurian, 2026-11-10)
+
+**As built:** the rule below, with the self-check's overlap test on raw rows (the clock
+restarts). Most conditions have three blocks, so the strides fall 36% train, 31% val, 33% test,
+not 60/20/20. `split.py` takes no arguments. `leg` is an allowed input (`docs/model_inputs.md`).
+
+The plan as it was written:
 
 - **Code:** `src/exogait/split.py`. It writes `splits.csv` and `split_counts.csv`, and holds
   `ALLOWED`, the input columns models may use. Its self-check asserts:
@@ -165,7 +188,17 @@ interaction-force units do not matter: those columns are not carried.
 - **Done when** `splits.csv`, `split_counts.csv` and the self-check run on AB68 + HL03, and
   `docs/model_inputs.md` lists every column.
 
-### J5 — Baselines and shared metrics (RO2, mandatory models)
+### J5 — Baselines and shared metrics (RO2, mandatory models) · done on val (Kurian, 2026-11-10)
+
+**As built** (`evaluate.py`'s docstring):
+- The two torques (`motor`, `gauge`) are fitted and reported separately: a `torque` column in
+  the results.
+- The phase mean is also keyed on `leg`: each gauge channel has its own offset.
+- Ridge is not tuned: val RMSE is the same to 0.1% for alpha 0.01–100.
+- Scored on the val blocks so far. **The test blocks wait for one final `--test` pass with
+  K3's models.**
+
+The plan as it was written:
 
 - **Code:** `src/exogait/evaluate.py`, which K3 then uses unchanged. It holds:
   - **`metrics(y, yhat)`:** RMSE, MAE, R² and nRMSE (RMSE / range of the measured torque in that
@@ -343,8 +376,8 @@ interaction-force units do not matter: those columns are not carried.
   `DesiredInteractionForces_*`): **banned**. `InteractionForces_{i+1}` tracks `JointTorques_i`.
   Not carried.
 - **`JointTorquesViaGauges_*`: banned as an input.** Carried only as a candidate target (Q9).
-- **The other leg's measured torque** (`hip_tau_other, knee_tau_other`): **banned as an input.**
-  Carried only for K5's replay.
+- **The other leg's measured torque** (`hip_tau_gauge_other, knee_tau_gauge_other`): **banned
+  as an input.** Carried only for K5's replay.
 - **`SM_*` (k, d, equilibrium angle and velocity): pending Q3.** They are carried, so the answer
   needs no K2 rerun. `SM_Gui_Parameter`: not carried.
 - **Gait phase and time normalisation: offline (Q4).**
@@ -379,10 +412,10 @@ interaction-force units do not matter: those columns are not carried.
 |---|---|---|---|
 | J1b | Kurian K6 | Per-participant mass and height, or "none published" | `notes/observations.md` |
 | J2 | Kurian K4 | Column meanings, units, signs, condition labels | `docs/exogait_data.md` (PR #7) |
-| J3 | Kurian K2 | Preprocessing code tested on AB68 + HL03 | `src/exogait/preprocess.py` |
-| J4 | Kurian K2, K3 | Splits, leakage self-check, allowed inputs | `split.py` (`ALLOWED`), `splits.csv` and `split_counts.csv` (AB68 + HL03), `docs/model_inputs.md` |
-| J5 | Kurian K3 | Metric function, results format, ablation loop | `src/exogait/evaluate.py` |
-| Kurian K2 | J5 (and J4 for review) | Processed data and splits, all 19 | `data/processed/exogait/` (zip, outside git) |
+| J3 (Kurian) | K2 | Preprocessing code, run on all 19 | `src/exogait/preprocess.py` |
+| J4 (Kurian) | K2, K3 | Splits, leakage self-check, allowed inputs | `split.py` (`ALLOWED`), `splits.csv` and `split_counts.csv`, `docs/model_inputs.md` |
+| J5 (Kurian) | K3 | Metric function, results format, ablation loop | `src/exogait/evaluate.py` |
+| Kurian K2 | Jasith (review, J7) | Processed data and splits, all 19 | `data/processed/exogait/` (134 MB; regenerate with `preprocess.py all`) |
 | Kurian K3 | Kurian K7 | Predicted torque on test strides | `predict/<model>_<ID>_pred.csv` |
 | J6 | Kurian K8 | Per-stride EMG features | `<ID>_emg.csv` |
 | Kurian K3, K9 | J7 | Results for statistics and figures | `predict/*.csv`, `moco/summary.csv`, `ro6/`, `split_counts.csv` |
@@ -390,9 +423,9 @@ interaction-force units do not matter: those columns are not carried.
 
 ## Order
 
-1. **Now:** J1 (the Python notice can go today, the email to the authors this week), J1b, J3 on
-   AB68 + HL03, and the MATLAB part of J8.
-2. J4 (it needs J3's `block`). J5 on AB68 + HL03, then on K2's full set.
+1. **Now:** J1 (the Python notice can go today, the email to the authors this week), J1b, the
+   review of the J3–J5 PR, and the MATLAB part of J8.
+2. ~~J3, J4, J5~~: done by Kurian on 2026-11-10.
 3. J7 once K3's results land (H4 once K9's land). J9 alongside.
 4. J6 when EMG arrives. If none by 2026-12-01, J6 closes as not possible and J9 says so.
 
