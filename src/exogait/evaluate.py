@@ -7,7 +7,7 @@
 
 In: data/processed/exogait/<ID>_strides.csv of every participant on disk, and splits.csv.
 Out: results/exogait/predict/<model>.csv, one row per RESULT_KEY with rmse, mae, r2, nrmse, infer_ms,
-n_strides, n_train_strides, host, commit (a re-run replaces its rows); and with --test
+n_strides, n_train_strides, epochs (iterative models), host, commit (a re-run replaces its rows); and with --test
 <model>_<ID>_pred.csv, the full-input predictions on the test strides (K7 replays them).
 The self-check writes to predict/selfcheck/ instead.
 
@@ -38,7 +38,12 @@ DataFrame, whole strides, 101 rows each in phase order) and returns (n, 2) Nm: h
                 of the inputs at each split; bag tries all of them, which is bagged trees
                 (BaggingRegressor(DecisionTreeRegressor()) with the same trees, only slower). Each tree
                 sees at most TREE_ROWS rows: a full-depth forest on a 400,000-row fold would not fit in memory
-    lstm        lstm.py (K3)
+    lstm        lstm.py: an LSTM over the stride. An iterative model (ITERATIVE) also gets the val rows, to stop
+                early: the other participants' for a population model, the participant's own for a personalised
+                one. With --test it gets the epoch count its val run chose instead, so run val first. Its
+                personalised model starts from its fold's population model (base). It has no no_phase arm (SKIP).
+                On val the personalised LSTM is stopped on the strides it is scored on, which flatters it:
+                only the test pass is a fair H1 for it
 Every model here is offline: phase and the 101-point time base need the next heel strike (J1 Q4).
 """
 
@@ -58,7 +63,7 @@ from preprocess import CONTROLLERS, MODES, OUT, ROOT, read_strides
 from split import ALLOWED, TARGETS
 
 RESULTS = ROOT / "results" / "exogait" / "predict"
-SCHEMES = ("personalised", "population")
+SCHEMES = ("population", "personalised")   # in this order: a personalised model may start from its fold's population model
 INPUTS = ALLOWED + ["accel"]
 ABLATIONS = {"full": [], "no_phase": ["phase", "gait_state", "stance_alpha"], "no_mode": ["mode"], "no_accel": ["accel"]}
 TREE_ROWS = 60_000   # rows per tree. Personalised fits have fewer and use them all
@@ -131,21 +136,40 @@ def evaluate(d, ids, models, test=False, out=RESULTS):
     out.mkdir(parents=True, exist_ok=True)
     done = []
     for name in models:
-        rows = []
+        if name == "lstm":   # torch only when it is asked for
+            from lstm import Lstm
+            MODELS["lstm"] = Lstm
+        rows, f = [], out / f"{name}.csv"
+        fit_key = ["scheme", "ablation", "torque", "participant"]
+        epochs = (pd.read_csv(f).query("split == 'val'").drop_duplicates(fit_key).set_index(fit_key).epochs.to_dict()
+                  if test and getattr(MODELS[name], "ITERATIVE", False) else {})   # what the val run chose
         for p in ids:
             own = d.participant == p
             score = d[own & (d.split == score_on)]
             cells = score.groupby(["mode", "controller"]).indices
-            pred = []
+            pred, population = [], {}
             for scheme in SCHEMES:
-                train = d[(own if scheme == "personalised" else ~own) & d.split.isin(fit_on)]
+                mine = own if scheme == "personalised" else ~own
+                train = d[mine & d.split.isin(fit_on)]
                 assert len(train) and set(train.split) <= set(fit_on) and (p in set(train.participant)) == (scheme == "personalised")
                 pred.append(score[ID].assign(scheme=scheme, ablation="full"))
                 for ablation, dropped in ABLATIONS.items():
+                    if ablation in getattr(MODELS[name], "SKIP", ()):
+                        continue
                     cols = [c for c in INPUTS if c not in dropped]
                     for torque, targets in TARGETS.items():
                         fit = train.dropna(subset=targets)   # a stuck gauge is NaN (preprocess.py)
-                        model = MODELS[name](cols, len(fit)).fit(fit, fit[targets].to_numpy())
+                        model, more = MODELS[name](cols, len(fit)), {}
+                        if getattr(model, "ITERATIVE", False):
+                            more["base"] = population.get((ablation, torque))   # None in the population pass
+                            if test:
+                                more["epochs"] = int(epochs[(scheme, ablation, torque, p)])
+                            else:
+                                val = d[mine & (d.split == "val")].dropna(subset=targets)
+                                more["val"] = (val, val[targets].to_numpy())
+                        model.fit(fit, fit[targets].to_numpy(), **more)
+                        if more and scheme == "population":
+                            population[(ablation, torque)] = model
                         t0 = time.perf_counter()
                         yhat = model.predict(score)
                         ms = 1e3 * (time.perf_counter() - t0) / score.stride.nunique()
@@ -159,14 +183,15 @@ def evaluate(d, ids, models, test=False, out=RESULTS):
                                     rows.append(dict(model=name, scheme=scheme, ablation=ablation, torque=torque, participant=p,
                                                      mode=mode, controller=controller, joint=("hip", "knee")[j], split=score_on,
                                                      **metrics(y[ok], yhat[i, j][ok], span.at[(p, mode), target]), infer_ms=ms,
-                                                     n_strides=int(ok.sum()) // 101, n_train_strides=len(fit) // 101, **stamp))
+                                                     n_strides=int(ok.sum()) // 101, n_train_strides=len(fit) // 101,
+                                                     epochs=getattr(model, "epochs", np.nan), **stamp))
             if test:
                 pd.concat(pred).to_csv(out / f"{name}_{p}_pred.csv", index=False, float_format="%.6g")
+            new = pd.DataFrame(rows)   # written after every participant: a run that dies keeps what it finished
+            if f.exists():
+                new = pd.concat([pd.read_csv(f), new]).drop_duplicates(RESULT_KEY, keep="last")
+            new.to_csv(f, index=False)
             print(f"{name} {p}: {len(score) // 101} {score_on} strides scored", flush=True)
-        new, f = pd.DataFrame(rows), out / f"{name}.csv"
-        if f.exists():
-            new = pd.concat([pd.read_csv(f), new]).drop_duplicates(RESULT_KEY, keep="last")
-        new.to_csv(f, index=False)
         done.append(pd.DataFrame(rows))
     return pd.concat(done)
 
@@ -209,6 +234,6 @@ if __name__ == "__main__":
         assert (w.r2 > 0.3).all(), "a baseline explains under 30% of the walking gauge torque (0.34-0.66 expected): check the alignment"
     w = r[r["mode"] == "walk"]
     print("walking, RMSE in Nm (mean over participants, controllers and joints):\n"
-          + w.pivot_table(index=["model", "torque", "scheme"], columns="ablation", values="rmse")[list(ABLATIONS)].round(2).to_string())
+          + w.pivot_table(index=["model", "torque", "scheme"], columns="ablation", values="rmse").reindex(columns=list(ABLATIONS)).round(2).to_string())
     print(f"{'OK (self-check): ' if not a.ids else ''}{len(r)} rows, split = {r.split.iloc[0]}, {r.participant.nunique()} participants; "
           f"{len(everyone)} on disk")
