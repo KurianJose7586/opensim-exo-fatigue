@@ -166,6 +166,8 @@ def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name):
     # the measured joint-output torque: replayed exactly (`measured`), or only its budget kept (`optimised`)
     measured = {a: lowpass(r["tau"][f"gauge_{c}"], T) for a, c in EXO.items()}
     assert max(np.abs(v).max() for v in measured.values()) < x2model.X2_TORQUE, "mean measured torque beyond the X2 limit"
+    stuck = [a for a, v in measured.items() if np.ptp(v) < 1.0]   # AB82's left-knee gauge reads -12.07 Nm throughout SM
+    assert not stuck or case == "none", f"{subj} {cond}: the gauge torque at {stuck} is constant: a stuck channel, nothing to replay"
     budget = {a: float(np.trapezoid(v ** 2, P * T)) for a, v in measured.items()}   # Nm^2 s
     tau = {"measured": measured, "none": {a: 0 * v for a, v in measured.items()}, "ideal": {}, "optimised": {}}[case]
     for a, v in tau.items():
@@ -403,8 +405,12 @@ def moment_vs_torque(subj, n_mesh=50):
     P, rows = x2model.P, []
     fig, axs = plt.subplots(2, 4, figsize=(15, 6.4), sharex=True)
     for axrow, cond in zip(axs, ("SM_WALKING", "transparent_WALKING")):
+        r = x2model.map_x2(subj, cond)
+        if min(np.ptp(r["tau"][f"gauge_{c}"]) for c in EXO.values()) < 1.0:   # a stuck gauge: no valid `measured` solve
+            axrow[0].set_title(f"{cond.split('_')[0]}: a gauge channel is stuck, no measured torque", fontsize=10)
+            continue
         t, M, muscle = net_moments(f"{subj}_{cond}_mean_measured_m{n_mesh}")
-        r, T = x2model.map_x2(subj, cond), t[-1]
+        T = t[-1]
         rms = lambda x: float(np.sqrt(np.trapezoid(x * x, t) / T))
         for ax, c in zip(axrow, ("hip_flexion_r", "knee_angle_r", "hip_flexion_l", "knee_angle_l")):
             gauge, motor = (np.interp(t, P * T, r["tau"][f"{k}_{c}"]) for k in ("gauge", "motor"))
@@ -425,7 +431,7 @@ def moment_vs_torque(subj, n_mesh=50):
         ax.set_xlabel("% stride from right heel strike")
     for ax in axs[:, 0]:
         ax.set_ylabel("Nm  (+ = along the OpenSim coordinate)")
-    fig.legend(*axs[0, 0].get_legend_handles_labels(), loc="lower center", ncol=4, frameon=False, fontsize=9)
+    fig.legend(*axs[1, 0].get_legend_handles_labels(), loc="lower center", ncol=4, frameon=False, fontsize=9)
     fig.suptitle(f"{subj} mean walking stride: what the joints need vs what the X2 delivered", fontsize=11)
     fig.tight_layout(rect=(0, 0.06, 1, 1))
     png = x2model.OUT / "plots" / f"k6_{subj.lower()}_moment_vs_torque.png"
@@ -472,7 +478,7 @@ if __name__ == "__main__":
     if sys.argv[1:2] == ["k6"]:   # track.py k6 [ID]: needs that participant's SM and TR solves
         rows, png = moment_vs_torque(sys.argv[2] if len(sys.argv) > 2 else "HL03")
         print("\n".join(str(r) for r in rows))
-        assert len(rows) == 8 and all(0 < r["net_rms"] < 80 and r["muscle_rms"] > 0 for r in rows), "implausible joint moments"
+        assert len(rows) in (4, 8) and all(0 < r["net_rms"] < 80 and r["muscle_rms"] > 0 for r in rows), "implausible joint moments"
         print(f"OK: hip and knee moments for SM and TR walking, summed from the K5 solutions. Figure: {png}")
         sys.exit()
     subj = sys.argv[1] if len(sys.argv) > 1 else "HL03"

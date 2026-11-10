@@ -398,6 +398,217 @@ muscles**: it is the kinematics-only OpenSense copy. A muscled Rajagopal model h
 - Not from `x2model.py`: the 19-participant hip-frame checks, the ID mass check and the tracking
   trial came from throwaway K4 investigation scripts. `x2model.py` asserts the mass from the .osim.
 
+### K5: MocoTrack reproduces the walking strides on the X2 model (`src/exogait/track.py`, 2026-11-10)
+
+- **Env rebuilt**, since `~/micromamba` was still gone: micromamba 2.10.0 (sha256 checked), env
+  `opensim` from the ONBOARDING recipe: Python 3.11.18, opensim 4.6, numpy 2.4.6 on OpenBLAS,
+  scikit-learn 1.9.1. Then torch 2.14.1+cu126 by pip: `torch.cuda.is_available()` is True on
+  the RTX 2050, and numpy is unchanged.
+- **One solve** = one participant × condition: the X2 model tracks the mean stride's hip, knee
+  and pelvis-tilt angles with its muscles and foot contact, while the exo actuators replay the
+  measured joint torque. Settings and their reasons: `track.py`'s docstring and
+  `notes/decisions.md` (2026-11-10).
+- **A cold start is fragile; a warm start is not.** From the tracked states, one solve
+  converged (HL03 SM, tracking weight 1: 157 iterations, 189 s on 16 threads). Four others,
+  each with one or more settings changed, were still at an objective of 10³–10⁵ when stopped
+  after 92–618 iterations, carried by reserve forces. Started from that one converged stride,
+  the same problem converges in 37 iterations, and **every other participant and controller
+  converged from it** (109–319 iterations). The stride is stored as
+  `models/exogait/seed_stride.sto`.
+- **The solver does not always land on the same solution.** Five `measured` solves were
+  repeated from the same seed after a marginal change to the reference's filter. Three agreed
+  within 6% on effort. HL03's first solve had stayed at the seed's own optimum (objective 1.350;
+  the repeat reached 1.019, with 3% less effort). AB69 SM's repeat came back with twice the
+  effort (0.392 → 0.839, objective 0.677 → 1.159): a clearly worse local solution. Hip and knee
+  tracking moved by at most 0.2° between them. So tracking results are robust to this, effort
+  is not, and every `measured` and `none` solve now gets a second start, the better one kept
+  (`assist.py second`; table and rule in `notes/decisions.md`, 2026-11-10). The numbers below
+  are after that pass.
+- **Tracking weight.** At weight 1 against effort 1 (HL03 SM) the model kept its knee about 4°
+  straighter through stance and its hip 3–5° short of extension, to save effort: RMSE hip
+  2.5–3.3°, knee 3.6–3.8°. At weight 10: hip 1.2°, knee 0.6–0.8°, pelvis tilt 1.5°.
+- **Mesh.** HL03 SM at 50 vs 100 intervals: hip and knee RMSE change by under 0.05°, pelvis by
+  0.2°. Effort is 9% lower at 100 (0.483 vs 0.530) and the heel-strike force peaks are higher
+  (1.58 vs 1.37 body weights). 50 is kept; effort is only compared between solves on the same
+  mesh. 100 intervals cost 375 s and 0.91 GB on 16 threads, against 0.64 GB at 50.
+- **All 19 participants × SM and TR walking** (mean strides of 14–64 strides, 1.9–5.6 s; 50
+  intervals; 4 threads each, four or five at a time):
+
+  | | |
+  |---|---|
+  | Converged | 38 of 38 (37 at tolerance 1e-3; AB75 TR at 1e-2, below) |
+  | Pass every plausibility check | 34. Three miss a tracking bound; AB82 SM is excluded (stuck gauge). Both below |
+  | Hip RMSE, median [range] | 0.60° [0.24–2.25] over the 34; 0.67° [0.24–4.15] over the 37 with a valid torque |
+  | Knee RMSE | 0.36° [0.15–1.21]; 0.38° [0.15–2.16] over the 37 |
+  | Pelvis-tilt RMSE (tracked at 0.2) | 1.92° [1.30–3.42]; 1.98° [1.30–6.60] over the 37 |
+  | Reserves | at most 0.03 Nm RMS at any joint or the pelvis |
+  | Exo torque as replayed vs prescribed | at most 0.97 Nm RMS (the mesh's linear interpolation) |
+  | Iterations, first start | 181 [37–319] |
+  | Solve time, first start | 525 s [47–982] |
+  | Peak memory | 0.53–0.64 GB |
+
+- **The three that miss a tracking bound** (hip and knee 3°, pelvis 6°), all converged:
+  - HL01 SM: left hip 3.13°.
+  - HL05 SM: left hip 4.15°. HL05 TR: pelvis tilt 6.6°. HL05 is the participant whose backpack
+    offset c is an outlier (−0.8°, against −5 to −24° for the rest), so its mapped hips reach
+    −13° of extension. The model will not extend past about −7°. This is K4's caveat showing:
+    c borrows the reference subject's pelvis tilt.
+- **AB82 SM is not a valid `measured` solve.** Its left-knee gauge reads a constant −12.07 Nm
+  through SM walking, SM ramps and TR ramps (5 of 760 participant × condition × joint cells;
+  no other channel is stuck). There is no measured torque to replay at that joint, so the solve
+  is excluded here and in K6 and K7. `track.py` now refuses a constant gauge torque, and
+  `checks.py` reports it. J3 has to flag it too.
+- **AB75 TR** (the slowest stride, 5.6 s at 0.08–0.11 m/s) sat on its optimum from about
+  iteration 180 (objective 1.0986 to four digits) without meeting the 1e-3 tolerance in 675
+  iterations, and was stopped. Re-run at MocoTrack's own tolerance of 1e-2 it converges in 293
+  iterations to the same objective and passes every check. Its row records `tol`.
+- **The walking speed is the model's own, and it matches the data.** No speed or stride length
+  is imposed, and the model walks at 0.08–0.49 m/s (median 0.25). Against the two estimates
+  from K4's stride analysis, over the 34 passing solves:
+  - hip travel over the planted foot: r = 0.95, mean difference −0.005 m/s, mean absolute
+    difference 0.024 m/s (10%);
+  - walkway length / bout time: r = 0.86, mean absolute difference 0.050 m/s (18%).
+
+  The first version imposed a stride length from the range of the ankle-to-ankle distance. That
+  estimate is too long (the model walks 0.81 of it, 0.58–0.96), and the solve sat on its bound.
+- Figures: `figures/k5_all_participants.png` (tracking error and speed, all participants) and
+  `figures/k5_hl03_sm_walking_tracking.png` (one solve in full). Every solve has one in
+  `results/exogait/plots/`.
+- **What is estimated, and how far to trust it:**
+  - **Ankle:** follows a plausible stance pattern; with no cost it fluttered ±10° in swing, so
+    the stock walk's ankle is a weak prior. In 10 of 37 solves it touches its −30° bound at
+    toe-off.
+  - **Ground reaction:** single support sits at 1.0 body weight and peaks are 1.0–1.9, but the
+    load bounces between the feet for 2–4 mesh points after each heel strike (64 ms per
+    interval at 50). There is no measured force to compare with.
+  - **Lumbar:** not recorded, bounded to 0–20°, and it reaches a bound in 13 of 37 solves. The
+    trunk actuator is priced as in the stock example (1 Nm = 1 excitation), so the trunk
+    balances almost passively. Lumbar moments are not realistic.
+  - **Effort:** mean activation is 0.05–0.07. The body is generic (62 kg + 20.7 kg of X2), so
+    absolute effort and moments are generic too; differences between cases mean more.
+- **OpenSim 4.6 traps hit:**
+  - `MocoTrack` with `apply_tracked_states_to_guess` resamples the tracked states onto the guess
+    grid, and for some stride durations its last time lands one floating-point digit short of
+    the final time: `resample()` throws "New final time cannot be less than existing final
+    time". Off when a guess is given.
+  - `solver.setGuess()` before the problem is final reports every state as "not in the
+    problem". `setGuessFile()` works: it is read at solve time.
+  - `MocoTrack.initialize()` writes `<name>_tracked_states.sto` into the cwd, so each solve
+    runs in its own folder.
+  - `MocoControlGoal` has no endpoint-constraint mode, and `MocoOutputGoal` on an actuator's
+    `actuation` fails with "State Cache entry was out of date at Stage Velocity". So an
+    integral of a control cannot be constrained (K7).
+  - Four `micromamba run` started in the same instant: one came up without the env
+    (`No module named 'opensim'`). Stagger the starts.
+  - Windows cannot replace a file another process has open: parallel solves must not rewrite
+    the shared model file.
+
+### K6: which torque the X2 delivers, and what the joints need (2026-11-10)
+
+- **`JointTorquesViaGauges` is the torque at the joint; `JointTorques` is the motor's.** On
+  all 19 participants, TR and SM walking, 4 joints (151 fits: all but AB82's stuck left knee
+  in SM; `checks.py` asserts it): `JointTorques` − gauges = I·q̈ + Coulomb + viscous friction +
+  constant, with R² 0.82–0.98 (median 0.94) and I = 1.81–2.29 kg m² (median 2.06). The X2's
+  published rotor inertia is 1.87 kg m². This answers the J2 puzzle (the two columns looked
+  uncorrelated): about half of the motor torque accelerates the motor's own rotor.
+  - The constant runs from −6.9 to +4.4 Nm: about −3.5 Nm at the hips and +1.7 Nm at the
+    knees. A gauge offset or direction-dependent friction: not separable from these data.
+  - The SM impedance slope of `JointTorques` (the K4 sign check) is 0.39–1.75 across all 19
+    (median 1.13). The check's first threshold of 0.5 was too tight for AB77 (0.44) and is now
+    0.2: a flipped sign gives about −1.
+- **Parameters:** `results/exogait/params.csv`, one row per participant. The hip offset c runs
+  from −0.8 to −23.8°. Body mass and height are generic until J1b.
+- **Moments from the solution, not from an ID re-solve.** `track.py k6` sums muscle tendon force
+  × moment arm, the exo torque and the reserves along each K5 solution. A `MocoInverse` re-solve
+  on the same kinematics (the `twin.net_moments()` pattern) left 14–34 N and 9–31 Nm RMS of
+  pelvis residual (3–4% of body weight) for HL03, because the contact forces are recomputed
+  from splined kinematics.
+- **What the joints need vs what the X2 delivered** (TR: 19 participants, 38 legs; SM: 18
+  participants, 36 legs, without AB82; median RMS over the stride, Nm; share = least-squares
+  fraction of the net moment the exo supplies; r = correlation of the delivered torque with the
+  net moment):
+
+  | | net moment | model's muscles | X2 at the joint | X2 motor | exo share, median [IQR] | r, median |
+  |---|---|---|---|---|---|---|
+  | SM hip | 14.4 | 12.8 | 10.3 | 12.4 | 0.27 [0.20, 0.38] | 0.44 |
+  | SM knee | 11.7 | 11.7 | 7.1 | 18.2 | 0.19 [0.08, 0.30] | 0.26 |
+  | TR hip | 16.3 | 19.3 | 13.8 | 9.6 | 0.09 [−0.01, 0.34] | 0.25 |
+  | TR knee | 14.0 | 14.5 | 8.8 | 10.5 | 0.12 [0.03, 0.25] | 0.22 |
+
+  Figure: `figures/k6_hl03_moment_vs_torque.png` (HL03, both modes).
+
+- **TR torque is device compensation, not assistance.** In TR the X2 delivers *more* torque at
+  the hip than in SM (13.8 vs 10.3 Nm RMS; higher in TR for 34 of 36 legs), but it supplies a
+  smaller share of what the joint needs and follows it less (share and r above; the share is
+  higher in SM for 26 of 36 hips and 28 of 36 knees). In TR the model's muscles produce more
+  moment than the joint needs in 35 of 38 hips (63 of 76 joints; 30 of 72 in SM), which means
+  part of the delivered torque is being opposed. In HL03 TR it is a steady +20 Nm of hip
+  flexion through right stance, while the joint's net moment stays near zero.
+  - It still unloads the model: against the X2 worn unpowered (`none`), the TR torque lowers
+    muscle effort by 34% (median; 14 participants, lower in all 14; K7). That fits a device
+    carrying its own 20.7 kg.
+  - So **TR solves are reported separately and are not used for H4** (the K5/K7 rule).
+  - **Caveat:** the steady part of the hip moment depends on trunk posture and on where the
+    backpack's mass sits, and neither is recorded. A 10° change in trunk lean moves the hip
+    moment by about 17 Nm. The correlations are more trustworthy than the shares.
+
+### K7: assistance cases on the mean SM stride (`src/exogait/assist.py`, 2026-11-10)
+
+- **Four exo torques on the same tracking problem:** `none` (zero), `measured` (K5),
+  `optimised` (Moco's choice under the measured torque's budget) and `ideal` (Moco's choice at
+  almost no cost: an upper bound). Effort is the sum of squared muscle activations integrated
+  over the stride, recomputed from each solution.
+- **The budget is met by pricing.** Moco cannot constrain the integral of squared torque
+  (`notes/decisions.md`, 2026-11-10). Each actuator's squared torque is priced in the effort
+  goal, and a secant search adjusts the four prices until each actuator spends 90–102% of the
+  measured budget. It took 3–5 solves per participant, each started from the last; the prices
+  settle at 0.13–2.68. A first version scaled the `ideal` torque down to the budget and
+  replayed it: that only matched `measured` (−0.7% for HL03), because `ideal` saturates at
+  ±80 Nm and its scaled copy is a poor shape.
+- **Second starts.** One solve per case is not enough (K5). `measured` was re-solved from the
+  `none` solution and `none` from the `optimised` one, and the lower objective kept. On the 16
+  SM comparisons the `measured` objective improved by more than 10% twice (AB69 −36%, AB80
+  −15%) and by 3% or less otherwise; `none` by 5% or less. `optimised` has one start: when HL03
+  was re-solved from a better `measured` solution its `optimised` effort fell from 0.422 to
+  0.350, so a single start understates `optimised` if anything.
+- **SM walking, mean strides, 16 participants, after the second starts** (HL01 and HL05 are
+  left out because their `measured` solves miss the tracking bound, AB82 because of its stuck
+  gauge):
+
+  | Effort | median | range | lower in | Wilcoxon signed-rank |
+  |---|---|---|---|---|
+  | `measured` vs `none` | −15.9% | −29.7 to +24.1% | 14 of 16 | p = 0.0092 |
+  | `optimised` vs `measured` | −33.6% | −50.3 to −26.3% | 16 of 16 | p = 3.1e-5 |
+  | `optimised` vs `none` | −43.4% | −62.8 to −35.5% | 16 of 16 | p = 3.1e-5 |
+
+  Median effort: `none` 0.474, `measured` 0.438, `optimised` 0.268. Hip and knee are tracked
+  within 2.3° in every solve, and `optimised` spends 0.90–1.02 of each actuator's budget.
+  Before the second starts the three medians were −14.6%, −33.0% and −42.3%.
+  - **The measured SM torque does not help everyone.** It raises the model's effort for AB70
+    (+8%) and AB75 (+24%, the slowest walker). Both held up under the second start.
+  - `ideal` (HL03, AB68 only): −60% and −59% against `none`, spending 7–39 times the budget.
+  - Figures: `figures/k7_all_participants.png`, and `figures/k7_hl03_sm_walking_assist.png` for
+    the torques of one participant.
+- **Smoothness.** The optimised torque's rate is 2.3 times the measured torque's (median;
+  1.1–3.6), with sharp pulses at heel strike. The gain does not depend on them. Low-passed at
+  3 Hz and rescaled to the measured budget, then replayed, the optimised torque is as smooth as
+  the measured one and still lowers effort against it: HL03 −25% (−32% unsmoothed), AB68 −36%
+  (−39%). (Rate RMS at the four actuators, Nm/s. HL03: measured 50–94, optimised 144–281,
+  smoothed 51–94. AB68: 43–83, 83–169, 43–71.)
+- **TR walking, 14 participants, after the second starts:** `measured` vs `none` −33.7%
+  (median; −48.8 to −0.2%; lower in 14 of 14; p = 0.00012). Not an H4 result: see K6. The TR
+  second starts changed little (`measured`: HL01 −5%, HL04 −2%, AB72 −1%, the rest under 0.5%;
+  `none` unchanged). AB75's second start stalled as its first had and was stopped. The `none`
+  solve misses the 3° hip bound for AB71 (3.35°) and AB78 (3.27°), and HL05 is out as before.
+- **What this is not.** One mean stride per participant, on a generic 2D body. Effort is a
+  model quantity: nothing here is checked against metabolic cost or EMG. Effort is mesh
+  dependent (9% lower at 100 intervals for HL03), so only same-mesh comparisons are made. The
+  budget is computed from the gauge torque with its offset left in. `none` is an X2 with no
+  friction or rotor inertia, which flatters it. The `ai` case waits for K3.
+- **Cost.** `none`: 46–204 iterations from the `measured` solution (2–8 minutes). `optimised`:
+  3–5 such solves. A full SM comparison took 10–20 minutes per participant, three at a time, and
+  the two second starts another 5–10.
+
 ---
 
 ## Open questions

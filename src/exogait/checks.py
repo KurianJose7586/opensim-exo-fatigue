@@ -88,11 +88,14 @@ def check(subj):
 
     # JointTorques is motor-side: JointTorques - gauges = rotor inertia x acceleration + friction, with the
     # published 1.87 kg m^2 (T-RO Table II). So JointTorquesViaGauges is the joint-output torque K5 replays
-    fits = []
+    fits, stuck = [], []
     for cond in ("transparent_WALKING", "SM_WALKING"):
         g = d[d.condition == cond]
         ok = np.r_[True, np.abs(np.diff(g.time.to_numpy()) - 1 / 333) < 1e-3]   # regular samples only
-        for i in JOINTS:
+        for i, name in JOINTS.items():
+            if g[f"JointTorquesViaGauges_{i}"].std() < 1:   # a stuck gauge channel: nothing to fit
+                stuck.append(f"{cond} {name} at {g[f'JointTorquesViaGauges_{i}'].mean():.2f} Nm")
+                continue
             qd = savgol_filter(g[f"JointVelocities_{i}"].to_numpy(), 31, 3)       # ~90 ms window
             qdd = savgol_filter(g[f"JointVelocities_{i}"].to_numpy(), 31, 3, deriv=1, delta=1 / 333)
             A = np.c_[qdd, np.tanh(qd / 0.05), qd, np.ones(len(qd))][ok]          # inertia, Coulomb, viscous, offset
@@ -101,6 +104,7 @@ def check(subj):
             fits.append((b[0], 1 - ((y - A @ b) ** 2).sum() / ((y - y.mean()) ** 2).sum(), b[3]))
     print("JointTorques - gauges = I qdd + friction, TR then SM x 4 joints: I", np.round([f[0] for f in fits], 2),
           "kg m^2, R2", np.round([f[1] for f in fits], 2), ", offset", np.round([f[2] for f in fits], 1), "Nm")
+    print("stuck gauge channels (constant within the condition):", stuck or "none")
 
     return hs_hip, knee_max, slope, fits
 

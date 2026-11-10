@@ -19,10 +19,15 @@ The same tracking problem (track.py) is solved with different exo torques:
 Effort = the sum of squared muscle activations, integrated over the stride and recomputed from each
 solution the same way. Never the Moco objective, which includes the tracking terms.
 
+    micromamba run -n opensim python -u src/exogait/assist.py second [ID] [condition]
+re-solves `measured` and `none` from a second start and keeps the better solution of each: IPOPT finds
+different local solutions from different starts, so run it before trusting a comparison.
+
 Writes results/exogait/plots/k7_<id>_<condition>_assist.png and a row in results/exogait/moco/assist.csv.
 """
 
 import csv
+import shutil
 import sys
 
 import numpy as np
@@ -59,6 +64,32 @@ def budgeted(subj, cond, n_mesh):
         old, spend, guess = w, now, track.MOCO / f"{subj}_{cond}_mean_optimised_m{n_mesh}.sto"
         w = {a: max(track.EXO_WEIGHT, w[a] * float(np.clip((now[a] / 0.96) ** (1 / slope[a]), 0.2, 8))) for a in track.EXO}
     raise AssertionError(f"optimised: prices did not settle on the budget in 12 steps: {now}")
+
+
+def second_start(subj, cond, case, start_case, n_mesh=50):
+    """Re-solve `case` from the solution of `start_case`, and keep whichever of the two has the lower
+    objective. IPOPT lands in different local solutions from different starts (notes "K7": one repeat
+    doubled the effort), so one solve per case is not enough. The second solve runs in moco/second/; if it
+    wins, its file replaces the first and its row is appended to summary.csv (the last row per key).
+    Returns the first objective, the second, and whether the second was kept."""
+    main = track.MOCO
+    done = pd.read_csv(main / "summary.csv")
+    hit = done[(done.participant == subj) & (done.condition == cond) & (done.case == case)
+               & (done.n_mesh == n_mesh) & (done["check"] == "ok")]
+    assert len(hit), f"{subj} {cond} {case}: no passing first solve"
+    first = float(hit.iloc[-1]["objective"])
+    name = f"{subj}_{cond}_mean_{case}_m{n_mesh}"
+    track.MOCO = main / "second"
+    try:
+        row = track.solve(subj, cond, n_mesh, main / f"{subj}_{cond}_mean_{start_case}_m{n_mesh}.sto", case)
+    finally:
+        track.MOCO = main
+    kept = row["check"] == "ok" and row["objective"] < 0.999 * first
+    if kept:
+        shutil.copy(main / "second" / f"{name}.sto", main / f"{name}.sto")
+        with open(main / "summary.csv", "a", newline="") as f:
+            csv.DictWriter(f, fieldnames=list(row)).writerow(row)
+    return first, row["objective"], kept
 
 
 def cases(subj, cond, n_mesh=50, ideal=False):
@@ -142,6 +173,13 @@ def compare(subj="HL03", cond="SM_WALKING", n_mesh=50, ideal=False):
 
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["second"]:   # assist.py second ID condition: second starts for `measured` and `none`
+        subj, cond = sys.argv[2], sys.argv[3]
+        have = lambda c: (track.MOCO / f"{subj}_{cond}_mean_{c}_m50.sto").exists()
+        for case, start in (("measured", "none"), ("none", "optimised" if have("optimised") else "measured")):
+            first, second, kept = second_start(subj, cond, case, start)
+            print(f"SECOND {subj} {cond} {case} from {start}: objective {first:.4f} -> {second:.4f}, {'kept' if kept else 'first stays'}", flush=True)
+        sys.exit()
     subj = sys.argv[1] if len(sys.argv) > 1 else "HL03"
     cond = sys.argv[2] if len(sys.argv) > 2 else "SM_WALKING"
     out, png = compare(subj, cond, int(sys.argv[3]) if len(sys.argv) > 3 else 50, sys.argv[4:5] == ["ideal"])

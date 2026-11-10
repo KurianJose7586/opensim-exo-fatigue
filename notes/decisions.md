@@ -424,3 +424,35 @@ So there are two solves instead of one:
 It is conservative: the true optimum under the budget is at least as good as a scaled copy of
 the unconstrained one. If `optimised` beats `measured`, H4 holds for that stride. If it does
 not, that stride is inconclusive, not a failure of H4.
+
+### 2026-11-10: every `measured` and `none` solve gets a second start
+
+IPOPT does not always land on the same solution. Five `measured` solves were repeated from the
+same seed after a marginal change to the reference's low-pass filter:
+
+| | objective, first → repeat | effort, first → repeat |
+|---|---|---|
+| HL03 SM | 1.350 → 1.019 | 0.530 → 0.516 |
+| AB68 SM | 0.628 → 0.641 | 0.341 → 0.361 |
+| AB68 TR | 1.016 → 1.114 | 0.553 → 0.589 |
+| AB69 SM | 0.677 → 1.159 | 0.392 → 0.839 |
+| AB69 TR | 0.720 → 0.733 | 0.456 → 0.461 |
+
+Three agree within 6% on effort. HL03's first solve had stayed at the seed's own optimum, a
+poorer one. AB69 SM's repeat came back with twice the effort: a clearly worse local solution.
+Tracking error barely moves between them (0.4° to 0.6° at worst), so K5's tracking results
+stand, but one solve per case is not enough for an effort comparison.
+
+**Rule:** `assist.py second` re-solves `measured` from the `none` solution and `none` from the
+`optimised` solution (from `measured` where there is no `optimised`), and keeps whichever has
+the lower objective. On the 16 SM comparisons the second start improved the `measured`
+objective by more than 10% twice (AB69 −36%, AB80 −15%) and by 3% or less otherwise; `none`
+moved by 5% or less. The medians barely moved (`optimised` vs `measured` −33.0% → −33.6%). On
+the 14 TR pairs the largest change was 5%.
+
+- **`optimised` gets one start.** Its price search is 3–5 solves, and a second search would
+  double the cost. When HL03 was re-solved from a better start, its `optimised` effort fell
+  further (0.422 → 0.350), so a single start understates `optimised` if anything: the
+  comparison is conservative for H4.
+- **Next:** a proper multi-start (several starts for every case, the best kept) before any
+  effort number is reported as final. It roughly doubles K9's solve count.

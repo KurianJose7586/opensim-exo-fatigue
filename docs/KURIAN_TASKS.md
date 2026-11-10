@@ -93,13 +93,13 @@ with `src/fatigue` on `sys.path`).
 
 | ID | Task | Depends on | Size | Status |
 |---|---|---|---|---|
-| K1 | Environment and data | — | M | **done** (PR #6, approved, not merged). MATLAB part dropped. Env rebuilt 2026-11-10; CUDA torch left (below) |
+| K1 | Environment and data | — | M | **done** (PR #6, approved, not merged). MATLAB part dropped. Env rebuilt 2026-11-10, with CUDA torch |
 | K2 | Preprocessing at scale (RO1) | J3 (preprocess); J4 (`split.py`, for the last done-when bullet) | L | todo |
 | K3 | Nonlinear torque models (RO2, H1–H3) | K2, J4, J5 | L | todo |
 | K4 | OpenSim model and X2 mapping (RO3) | K1, J2 | L | **in progress**: model, mapping and torque sign done; Jasith's plot check left |
 | K5 | MocoTrack: reproduce the gait | K4 | L | **walking done** on mean strides, all 19 × SM/TR. Single strides (need J3) and ramps left |
 | K6 | Personalised twin state (Layer 4) | K5; J1b (soft: generic anthropometry is the default) | M | **done** on mean walking strides. Mass and height wait for J1b |
-| K7 | AI + Moco integration (RO4, H4) | K3, K5, K6, J1 Q5 | L | **in progress**: `none`, `measured`, `optimised` done on mean SM strides. `ai` waits for K3 |
+| K7 | AI + Moco integration (RO4, H4) | K3, K5, K6, J1 Q5 | L | **in progress**: `none`, `measured`, `optimised` done on mean SM strides (16 participants). `ai` waits for K3 |
 | K8 | Assist-as-needed controller with EMG (Layer 6, H5) | K7, J6 | L | **blocked**: no EMG (J1 Q8). Closes as not possible if none by 2026-12-01 |
 | K9 | RO6 evaluation at scale | K3, K7 (K8 if EMG) | L | todo |
 
@@ -116,9 +116,8 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
 - **Env rebuilt 2026-11-10** from ONBOARDING §2 (it had gone from `~/micromamba`): micromamba
   2.10.0, Python 3.11.18, opensim 4.6, numpy 2.4.6, scikit-learn 1.9.1, on OpenBLAS. MocoTrack
   runs in it (all of K5).
-- **Follow-up (S):** the CUDA torch wheel (Shared rules), needed from K3 on. Done when
-  `torch.cuda.is_available()` prints True. torch and opensim stay in separate processes (Shared
-  rules), so no one-process test is needed.
+- **CUDA torch is in** (2.14.1+cu126): `torch.cuda.is_available()` is True on the RTX 2050.
+  torch and opensim stay in separate processes (Shared rules), so no one-process test was run.
 
 ### K2 — Preprocessing at scale (RO1)
 
@@ -131,7 +130,8 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
   - **`time` stays float64.** The raw clock runs to 1,234–4,855 s, where float32 resolves only
     0.12–0.49 ms: it turns 0–33 real dt ≤ 0 per file into up to 1,238. float32 only for angle,
     velocity and torque columns.
-- **Known traps (J2, checked on all 19):** AB72's column order; every HL file (33 dt ≤ 0 each,
+- **Known traps (J2, checked on all 19):** AB82's left-knee gauge torque is stuck at −12.07 Nm
+  in SM walking, SM ramps and TR ramps (K5); AB72's column order; every HL file (33 dt ≤ 0 each,
   `*_UNDEFINED2` labels); 1–3 dt ≤ 0 in AB69/72/76/80/82; removed rests up to 352 s; two sites
   (Chicago and Madrid) with different stairs and ramps.
 - **In:** `data/raw/exogait/*.csv`, read only.
@@ -350,6 +350,10 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
     budget. It takes 3–6 solves, each started from the last.
 - **Effort:** the sum of squared muscle activations, integrated over the stride and recomputed
   from each solution, the same way for every case. Never the Moco objective.
+- **Second starts:** IPOPT lands in different local solutions from different starts, and one
+  repeat doubled the effort (`notes/decisions.md`, 2026-11-10). `assist.py second` re-solves
+  `measured` from the `none` solution and `none` from the `optimised` one, and keeps the lower
+  objective. Run it before reading a comparison. A full multi-start is still to come.
 - **Constraints:** the X2 torque limits as actuator bounds; the K5 plausibility checks on every
   solve (the tracking bound among them); the budget asserted on `optimised`.
 - **Smoothness:** the RMS rate of each exo torque (Nm/s) is in `summary.csv` and `assist.csv`.
@@ -390,9 +394,9 @@ Sizes: S = a day or two, M = about a week, L = more than a week.
   ramps), 6× the example's half-cycle, so expect minutes per solve.
   - **Default:** up to 5 eligible right test strides per participant × mode × controller
     (19 × 3 × 2 × 5 = 570 strides). Per stride that is one solve each for `none`, `measured`
-    and `ai`, and 3–6 for `optimised` (the price search): about 4,000 solves at 50 mesh
-    intervals. At about 2 minutes per solve net, four at a time, that is 5–6 days on this
-    machine, not a night.
+    and `ai`, a second start for the first two, and 3–5 for `optimised` (the price search):
+    about 5,000 solves at 50 mesh intervals. At about 2 minutes per solve net, four at a time,
+    that is about a week on this machine, not a night.
   - All strides would be about 1,000 CPU-hours: the DGX (Parked, access requested in Order 1).
 - **Measures:**
   - prediction accuracy (the J5/K3 rows);
@@ -495,9 +499,8 @@ This is the default; J4 may change it.
 
 ## Order
 
-1. **Now:** merge the open PRs (#6, #7, #8, #9, then the K5–K7 one). Install the CUDA torch
-   wheel. Ask the supervisors for DGX access (K9 at full scale). K4 waits only on Jasith's plot
-   check.
+1. **Now:** merge the open PRs (#6, #7, #8, #9, then the K5–K7 one). Ask the supervisors for
+   DGX access (K9 at full scale). K4 waits only on Jasith's plot check.
 2. Run K2's preprocessing as soon as J3 lands; run `split.py` on all 19 once J4 lands; then K3.
    **This is the critical path: K3, K7's `ai` case and K9 all wait on J3, J4 and J5.**
 3. K5 on single strides (needs J3's strides file) and on ramps (tilted floor). K7's `ai` case
