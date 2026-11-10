@@ -539,3 +539,17 @@ J1b's default was "generic anthropometry, since ExoGait has none". The dataset's
   gauge torque; H1 on the LSTM in walking; H2 on the random forest in walking (the LSTM has no
   no-phase arm); H3 on the LSTM over all five modes, not walking alone as planned, because what a
   mode input can add is telling the modes apart.
+
+### 2026-11-11: EMG requested from the dataset's authors
+
+Kurian emailed Clément Lhoste and Lorenzo Vianello (one email, both in "To") on 2026-11-11, asking
+for the EMG files of HL01–HL05, their sampling rate and clock alignment, the muscle list, and
+whether they are raw or processed. The email also reported AB82's stuck left-knee gauge and the
+clock restarts in five files.
+
+- **If no reply in a week:** a nudge on the same thread, then the senior author (José Pons).
+- **If no EMG by 2026-12-01** (the cutoff already in the plan), proposed to the mentor, not yet
+  agreed: test H5 on the twin's own muscle activations in place of recorded EMG, stated as such,
+  and check the twin's muscle timing against the EMG in Camargo et al. 2021 (unassisted walking,
+  other people). H5 on real EMG is then reported as not testable. The Camargo data has not been
+  downloaded or matched to our muscles yet.
