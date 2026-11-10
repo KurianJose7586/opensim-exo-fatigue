@@ -515,3 +515,27 @@ J1b's default was "generic anthropometry, since ExoGait has none". The dataset's
   ask (clhost@ethz.ch, lvianello@sralab.org).
 - `stance_alpha` and `gait_state` stay in the offline models and in H2's no-phase arm: being
   online does not stop them encoding phase.
+
+### 2026-11-10: K3: acceleration is an input; forests as built; the LSTM without dropout
+
+- **`accel` is an input for every model**, with a `no_accel` arm in the ablation loop. It is the
+  time derivative of the recorded velocities, so nothing new is measured. Reason: K6's rotor
+  term, and what it does to ridge on val (`observations.md`, "K3"). It is exploratory in J7's
+  tables: not one of H1–H3.
+  - Taken on the 101-point grid (a central difference, 13–110 ms apart), in `features()`, so the
+    processed files do not change. A Savitzky–Golay derivative of the raw 333 Hz velocity is the
+    upgrade if the residual matters.
+- **Forests:** `RandomForestRegressor` for both. `bag` is `max_features=1.0`, which is bagged
+  trees, instead of `BaggingRegressor(DecisionTreeRegressor())`: the same trees, built in
+  parallel. One setting (100 trees, leaves of 5, 60,000 rows per tree), not tuned: the two
+  models already span the one parameter that matters, and they agree to 0.3 Nm.
+- **The LSTM has no dropout.** With dropout between its layers, cuDNN crashes Python at exit on
+  this machine (torch 2.14.1+cu126, Windows): exit code 0xC0000409 after a clean run. Early
+  stopping on the val blocks is the regulariser.
+- **Schemes run population first**, so the personalised LSTM can start from its fold's
+  population model. `evaluate.py` writes its rows after every participant: two sessions ended
+  under long runs today.
+- **J7's primary endpoints** are fixed in `stats.py` before the test blocks are scored: the
+  gauge torque; H1 on the LSTM in walking; H2 on the random forest in walking (the LSTM has no
+  no-phase arm); H3 on the LSTM over all five modes, not walking alone as planned, because what a
+  mode input can add is telling the modes apart.

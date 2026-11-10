@@ -758,6 +758,54 @@ releases those recordings: the ExoGait data.)
   masses by body mass), which is what RO3 ("participant-informed") asks for. It means solving
   K5–K7 again on 19 scaled models, about a night. Not started: it is a decision (`decisions.md`).
 
+### K3: acceleration is the missing input, and the forests on the validation blocks (`evaluate.py`, 2026-11-10)
+
+All numbers here are on the **validation blocks**, all 19 participants. The test blocks are not scored yet.
+
+- **Joint acceleration explains the motor torque.** K6 found that `JointTorques` minus the gauge
+  torque is the rotor's inertia times the joint acceleration, plus friction. The baselines saw
+  angle and velocity at one instant, so they could not see that term (hip R² under 0.2). Adding
+  the time derivative of each recorded velocity along the stride (`accel`, taken in
+  `features()` as a central difference on the 101-point grid) changes ridge like this, in walking:
+
+  | Ridge, walking | RMSE without | RMSE with | R² without (hip, knee) | R² with |
+  |---|---|---|---|---|
+  | motor torque, personalised | 15.4 Nm | 8.9 Nm | 0.18, 0.48 | 0.71, 0.80 |
+  | motor torque, population | 15.9 | 9.6 | 0.16, 0.41 | 0.63, 0.77 |
+  | gauge torque, personalised | 7.5 | 6.5 | 0.56, 0.60 | 0.71, 0.67 |
+  | gauge torque, population | 8.8 | 7.8 | 0.43, 0.47 | 0.58, 0.49 |
+
+  - It helps every model in every participant: with against without, per participant, walking,
+    lower in 19 of 19 for ridge, the random forest and bagged trees, on both torques.
+  - It is derived from recorded inputs only, so it exists at inference, and it is not one of the
+    mentor's hypotheses. `evaluate.py` keeps a `no_accel` arm so the comparison stays on record.
+  - The gauge torque gains too (it is not only a motor effect): the joint-output torque of a
+    moving link carries the link's own inertia.
+- **Forests** (`rf`: a third of the inputs per split; `bag`: all of them; 100 trees, leaves of 5
+  rows, at most 60,000 rows per tree). RMSE in Nm, full inputs, the mean over participants,
+  controllers and joints:
+
+  | Torque | Scheme | Model | walk | ramp up | ramp down | stairs up | stairs down |
+  |---|---|---|---|---|---|---|---|
+  | gauge | personalised | ridge | 6.5 | 7.2 | 7.3 | 9.5 | 10.1 |
+  | gauge | personalised | random forest | 4.2 | 5.0 | 5.0 | 5.3 | 6.8 |
+  | gauge | population | ridge | 7.8 | 8.2 | 8.5 | 10.4 | 10.9 |
+  | gauge | population | random forest | 5.5 | 5.9 | 5.8 | 5.9 | 7.4 |
+  | motor | personalised | ridge | 8.9 | 9.8 | 9.6 | 10.7 | 11.2 |
+  | motor | personalised | random forest | 6.8 | 7.7 | 7.7 | 7.3 | 9.0 |
+  | motor | population | ridge | 9.6 | 10.4 | 10.2 | 11.1 | 11.7 |
+  | motor | population | random forest | 7.2 | 7.9 | 7.9 | 7.0 | 8.9 |
+
+  - Walking R² of the random forest (median; hip, knee): gauge 0.88, 0.86 personalised and 0.80,
+    0.77 population; motor 0.82, 0.90 and 0.80, 0.89.
+  - Bagged trees are the same model to within 0.3 Nm in every mode and arm.
+  - Directions per participant, random forest, gauge torque: personalised 4.4 vs population
+    5.3 Nm in walking (lower in 18 of 19); with phase 4.4 vs 4.5 (17 of 19); with mode 4.77 vs
+    4.82 over all modes (19 of 19). So for a forest, phase and mode add little once it has the
+    two legs' angles and velocities, the gait state and the load split: it can read them off.
+  - Cost: the random forest's val run took 22 minutes, bagged trees 71 (8 threads). Inference
+    0.6–0.7 ms per stride, against 0.06 for ridge.
+
 ---
 
 ## Open questions
