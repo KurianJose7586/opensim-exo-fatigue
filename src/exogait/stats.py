@@ -188,7 +188,7 @@ if __name__ == "__main__":
     figure(FIG / f"h4{SCALED}.png", [("optimised vs measured", a.effort_optimised, a.effort_measured), ("optimised vs exo off", a.effort_optimised, a.effort_none),
                             ("measured vs exo off", a.effort_measured, a.effort_none)], ("", ""),
            "muscle effort over the stride (sum of squared activations x s)",
-           f"H4{', scaled bodies' if SCALED else ''}: simulated muscle effort over the mean SM walking stride, {len(a)} participants (left value: the first named case)")
+           f"H4{' on scaled bodies' if SCALED else ''}: simulated muscle effort, mean SM walking stride, {len(a)} participants (left value: the first named case)")
     for row in t.itertuples():
         print(f"h4 {row.kind}: {row.controller} {row.a} vs {row.b}: {row.a_median:.3f} vs {row.b_median:.3f}, lower in {row.a_lower}/{row.n}, "
               f"p = {row.p:.2g}, r = {row.r_rb:+.2f}" + ("" if row.kind == "primary" else f", Holm p = {row.p_holm:.2g}"))
