@@ -609,7 +609,357 @@ muscles**: it is the kinematics-only OpenSense copy. A muscled Rajagopal model h
   3–5 such solves. A full SM comparison took 10–20 minutes per participant, three at a time, and
   the two second starts another 5–10.
 
+### K2 with J3–J5: strides, splits and baselines on all 19 (`preprocess.py`, `split.py`, `evaluate.py`, 2026-11-10)
+
+Kurian took J3–J5 over (`decisions.md`, 2026-11-10). All numbers below are from all 19 files.
+
+- **Strides.** 9,697 detected (heel strike to heel strike, with at least one row in a labelled
+  condition), **5,964 kept**: 220 (AB78) to 458 (AB79) per participant.
+
+  | Dropped for | Strides |
+  |---|---|
+  | crossing a label change (into a turn, a transition, another pass) | 2,237 |
+  | marked incomplete by the dataset (`step_complete` False) | 1,399 |
+  | outlier duration (outside 0.5–1.5 of the median complete stride) | 75 |
+  | sampling holes (one over 50 ms, or over 20% of samples missing) | 22 |
+  | crossing a removed rest; a dt ≤ 0 inside | 0; 0 |
+
+  - Every removed rest and every dt ≤ 0 sits among `UNDEFINED` rows, so a stride that touches
+    one already fails the label rule. The two rules stay in the code.
+  - **What `step_complete` False means.** Looked at on AB68, HL03, AB72, AB82 and HL05 (2,034
+    candidates inside one block). It marks the first stride of most passes (9–39 per
+    participant: a normal duration, one heel strike of the other leg) and the phase wraps while
+    standing (0.1–0.5 of a stride long, mostly with no heel strike of the other leg). The 1,618
+    strides it calls complete are real: one heel strike of the other leg in each (two in 7 of
+    HL05's), and none shorter than half the median.
+  - Durations of the complete strides: 1,546 of 1,618 within 0.75–1.25 of the median, 30 below
+    0.75, 25 in 1.25–1.5, 17 above 1.5 (pauses, up to 2.4 times). Kept strides last 1.3–11.4 s
+    (median 3.2 s; 99% under 6.4 s; the long ones are stairs).
+  - Sampling holes: single dropped samples are everywhere in the AB files (6.6% of AB68's
+    intervals), and holes reach 33 ms routinely. In the kept strides the worst hole is 45 ms and
+    the most missing 19.7%. The 22 dropped strides are in AB76 and AB78 (11 each).
+- **The clock restarts in five files.** `time` steps backwards once in AB69 (−114 s), AB72
+  (−1,230 s), AB80 (−1,309 s) and AB82 (−1,347 s), and three times in AB76 (−999, −1,705,
+  −109 s), each time between two `UNDEFINED` rows, and then runs over the same seconds again.
+  This is what J2's "1–3 dt ≤ 0 in AB69/72/76/80/82" was. The HL files' 33 dt ≤ 0 are repeated
+  time stamps. So `t` does not order a session. `split.py`'s self-check found it: 16 of AB72's
+  test strides "overlapped" training strides in time. Strides and blocks are now numbered by raw
+  row, each stride carries `row_start, row_end`, and the overlap check runs on rows.
+- **Stuck gauge.** AB82's left-knee gauge is constant in 94 kept left strides (SM walking 36,
+  SM ramps 17 + 12, TR ramps 15 + 14), as K5 found on the mean strides. It is written as NaN.
+  No other channel is stuck: the smallest movement of a live gauge over a kept stride is 10 Nm
+  (knee) and 19 Nm (hip), against a 0.5 Nm threshold.
+- **Kept strides per condition** (both legs; minimum, median, maximum over participants):
+
+  | | SM | TR |
+  |---|---|---|
+  | walk | 42, 81, 139 | 47, 71, 139 |
+  | ramp up | 13, 23, 43 | 8, 20, 34 |
+  | ramp down | 14, 27, 45 | 6, 24, 35 |
+  | stairs up | 13, 15, 21 | 10, 15, 20 |
+  | stairs down | 0, 14, 22 | 6, 12, 17 |
+
+  AB80 has no kept stride on SM stairs down (4 detected per leg, all crossing a label change).
+- **Blocks and splits.** A condition has three blocks in 132 of the 190 participant × mode ×
+  controller cells, five in 35 (walking), four in 12, two in 7, one in 2 (AB79's TR ramps), seven
+  in 1. A block holds 1–33 strides (median 7). So whole-block splits fall into thirds: 35.8%
+  of the strides train, 31.3% val, 32.8% test, not the planned 60/20/20. Seven conditions have
+  no val block; three have no personalised test (AB79's two TR ramps, AB80's SM stairs down).
+  Test strides per condition (median): walk 23–26, ramps 7–8, stairs 4–5.
+- **Size and time.** 134 MB for all 19 (5–11 MB each). `preprocess.py all` takes 80 s,
+  `split.py` 2 s, the two baselines on the val blocks 57 s (456 fits each).
+- **Baselines on the validation blocks** (full inputs; RMSE in Nm, the mean over participants,
+  controllers and joints). These are not the test numbers: the test blocks wait for the final pass.
+
+  | Torque | Model | Scheme | walk | ramp up | ramp down | stairs up | stairs down |
+  |---|---|---|---|---|---|---|---|
+  | gauge | phase mean | personalised | 8.0 | 8.7 | 9.1 | 8.2 | 11.0 |
+  | gauge | phase mean | population | 10.1 | 9.9 | 10.6 | 9.5 | 11.5 |
+  | gauge | ridge | personalised | 7.5 | 8.3 | 8.1 | 10.5 | 10.9 |
+  | gauge | ridge | population | 8.8 | 9.4 | 9.3 | 11.3 | 11.7 |
+  | motor | phase mean | personalised | 16.4 | 17.8 | 18.4 | 15.8 | 18.4 |
+  | motor | phase mean | population | 17.8 | 18.0 | 18.5 | 15.5 | 17.3 |
+  | motor | ridge | personalised | 15.4 | 15.5 | 15.9 | 14.9 | 16.0 |
+  | motor | ridge | population | 15.9 | 16.0 | 16.3 | 15.1 | 16.2 |
+
+  - Walking R² (median; hip, knee): gauge torque 0.48, 0.58 (personalised phase mean) and 0.56,
+    0.60 (personalised ridge). Motor torque 0.14, 0.37 and 0.18, 0.48. nRMSE is 0.08–0.12.
+  - **The motor torque is the hard target, and K6 says why.** About half of it is the rotor's
+    inertia times the joint acceleration, and acceleration is not an input: the baselines see
+    angle and velocity at one instant. Their hip R² is under 0.2. A model that sees acceleration
+    (a derived input, or a sequence model) should do much better. That is the first thing to try
+    in K3.
+  - Directions on val, walking, per participant (both controllers and joints pooled), ridge on
+    the gauge torque: personalised 7.7 vs population 8.8 Nm (lower in 19 of 19); with phase 7.7
+    vs without 8.9 (19 of 19); with mode 7.7 vs without 7.9 (19 of 19). On the phase mean the
+    mode input matters on stairs, not on walking (stairs up 8.2 vs 11.1 Nm without it), so H3's
+    endpoint cannot be walking alone (J7).
+  - Ridge's alpha does not matter: val RMSE is the same to 0.1% for 0.01–100.
+  - Inference: 0.04–0.06 ms per stride.
+
+### A film of the solved stride (`src/exogait/animate.py`, 2026-11-10)
+
+- `figures/k7_hl03_sm_walking_stride.mp4` (three strides), `.gif` (one, looping) and `.png`:
+  HL03's mean SM stride with the exo off, the measured torque and the optimised torque, side by
+  side in real time. Muscle paths are coloured by activation; an orange wedge at each hip and knee
+  motor shows the exo torque; the right hip and knee torque run underneath with a cursor.
+- It draws the solutions as they are: the 103 nodes of each `.sto`, nothing smoothed. Effort is
+  recomputed from each solution: 0.636, 0.516 (−19%) and 0.350 (−45%) for HL03.
+- Two things the film shows that the tables do not. HL03 walks at 0.29 m/s, so the pelvis nearly
+  stops once per stride (its slowest forward speed is 0.00–0.01 m/s). And the contact spheres
+  sink 2.6 cm into the floor at most: the contact model's give, the same in all three cases.
+- The drawn foot is rigid (the model's toe joint is welded), so its tip dips under the floor
+  line at toe-off. The contact spheres do not.
+
+### J1b: the dataset's paper gives every participant's mass and height, and answers three J1 questions (2026-11-10)
+
+The paper behind the Dryad dataset is Lhoste, Cantón, Küçüktabak, Short, … Vianello, Pons,
+"Simplifying rehabilitation control of lower-limb exoskeletons in five ambulation modes via
+dataset-driven state-machine calibration", J NeuroEng Rehabil 23:114 (2026),
+doi:10.1186/s12984-026-01917-8, open access (PMC13045145). Read through Europe PMC's full text.
+(It proposes a way to set up an exoskeleton's walking controller from a public dataset of
+unassisted walking, tests it on 19 healthy people on flat ground, ramps and stairs, and
+releases those recordings: the ExoGait data.)
+
+- **Mass and height are published, per participant** (its Table 2: sex, height, weight, age).
+  Copied to `models/exogait/participants.csv`. The copy reproduces the paper's own statistics:
+  69.5 ± 11.7 kg, 11 men and 8 women. Height 1.75 ± 0.09 m (1.58–1.88), mass 47–90 kg, age
+  23–45. The twin's body is 62 kg: it is 28 kg too light for AB68 and 15 kg too heavy for HL05.
+  `params.csv` now carries the measured values, and says the model is not yet scaled.
+- **Its walking speeds match ours.** Preferred overground speed in TR: 0.26 ± 0.087 m/s. K4's
+  kinematic estimate (hip travel over a mean stride) gives 0.27 ± 0.096 m/s for the same 19.
+  The paper has SM 27% faster (95% CI 19–35%); ours is 21% faster on the group means (0.327 vs
+  0.270 m/s). An independent check of the stride-length estimate that K5's speed comparison
+  leans on, and of how slow this walking is.
+- **AB and HL are the two sites** (J1 Q12): "AB" was recorded in the U.S.A., "HL" in Spain. Not
+  clinical groups.
+- **`StanceInterpolationFactor` is a measurement of load** (J1 Q11): one foot's share of
+  the vertical ground reaction force, from 32 force-sensitive resistors in the two footplates.
+  (The paper's text reads as the left foot's. In the data it is the right foot's: 1 in right
+  single support.)
+  The controller computes it online at 333 Hz, and switches gait state on a hip-angle
+  threshold and on this factor (threshold 0.2). So `stance_alpha` and `gait_state` are
+  online signals, not offline like `gait_cycle`. Two consequences:
+  - they stay out of H2's no-phase arm all the same, since they encode phase;
+  - **ExoGait does carry ground-reaction information after all**: not forces, but the
+    left-right split of the vertical force through the stride. K5's solutions predict that
+    split from the contact model, so it can be checked against the measurement. Nothing in the
+    tracking uses it, which makes it a held-out test of the twin. Done: "K6: a held-out check"
+    below.
+- **Heel strikes** come from the footplate sensors, and `gait_cycle` is interpolated between
+  them, as assumed (offline).
+- **SM parameter units** (J1 Q3): stiffness in Nm/rad, damping in Nm·s/rad. Starting values per
+  mode in its Table 1 (walking: hip 90 and 7, knee 70 and 4 in the stiffer of its two settings).
+- **Torque sensing:** four strain gauges on the link distal to each active joint, and the
+  interaction torque is estimated from them. That is K6's reading of `JointTorquesViaGauges`.
+  Peak torque 80 Nm, 100 W, joint speed limit 3 rad/s.
+- **EMG exists but is not released** (J1 Q8): for the five Madrid participants (HL01–HL05),
+  rectus femoris, vastus lateralis, tibialis anterior and medial gastrocnemius on both legs (the
+  Dryad README adds biceps femoris). The paper only says the data "will be made publicly
+  available". Dryad has none. So the request goes to the authors, and it is for five people.
+- **What follows for K6.** The twin can be scaled per participant (segment lengths by height,
+  masses by body mass), which is what RO3 ("participant-informed") asks for. It means solving
+  K5–K7 again on 19 scaled models, about a night. Not started: it is a decision (`decisions.md`).
+
+### K3: acceleration is the missing input, and the forests on the validation blocks (`evaluate.py`, 2026-11-10)
+
+All numbers here are on the **validation blocks**, all 19 participants. The test blocks are not scored yet.
+
+- **Joint acceleration explains the motor torque.** K6 found that `JointTorques` minus the gauge
+  torque is the rotor's inertia times the joint acceleration, plus friction. The baselines saw
+  angle and velocity at one instant, so they could not see that term (hip R² under 0.2). Adding
+  the time derivative of each recorded velocity along the stride (`accel`, taken in
+  `features()` as a central difference on the 101-point grid) changes ridge like this, in walking:
+
+  | Ridge, walking | RMSE without | RMSE with | R² without (hip, knee) | R² with |
+  |---|---|---|---|---|
+  | motor torque, personalised | 15.4 Nm | 8.9 Nm | 0.18, 0.48 | 0.71, 0.80 |
+  | motor torque, population | 15.9 | 9.6 | 0.16, 0.41 | 0.63, 0.77 |
+  | gauge torque, personalised | 7.5 | 6.5 | 0.56, 0.60 | 0.71, 0.67 |
+  | gauge torque, population | 8.8 | 7.8 | 0.43, 0.47 | 0.58, 0.49 |
+
+  - It helps every model in every participant: with against without, per participant, walking,
+    lower in 19 of 19 for ridge, the random forest and bagged trees, on both torques.
+  - It is derived from recorded inputs only, so it exists at inference, and it is not one of the
+    mentor's hypotheses. `evaluate.py` keeps a `no_accel` arm so the comparison stays on record.
+  - The gauge torque gains too (it is not only a motor effect): the joint-output torque of a
+    moving link carries the link's own inertia.
+- **Forests** (`rf`: a third of the inputs per split; `bag`: all of them; 100 trees, leaves of 5
+  rows, at most 60,000 rows per tree). RMSE in Nm, full inputs, the mean over participants,
+  controllers and joints:
+
+  | Torque | Scheme | Model | walk | ramp up | ramp down | stairs up | stairs down |
+  |---|---|---|---|---|---|---|---|
+  | gauge | personalised | ridge | 6.5 | 7.2 | 7.3 | 9.5 | 10.1 |
+  | gauge | personalised | random forest | 4.2 | 5.0 | 5.0 | 5.3 | 6.8 |
+  | gauge | population | ridge | 7.8 | 8.2 | 8.5 | 10.4 | 10.9 |
+  | gauge | population | random forest | 5.5 | 5.9 | 5.8 | 5.9 | 7.4 |
+  | motor | personalised | ridge | 8.9 | 9.8 | 9.6 | 10.7 | 11.2 |
+  | motor | personalised | random forest | 6.8 | 7.7 | 7.7 | 7.3 | 9.0 |
+  | motor | population | ridge | 9.6 | 10.4 | 10.2 | 11.1 | 11.7 |
+  | motor | population | random forest | 7.2 | 7.9 | 7.9 | 7.0 | 8.9 |
+
+  - Walking R² of the random forest (median; hip, knee): gauge 0.88, 0.86 personalised and 0.80,
+    0.77 population; motor 0.82, 0.90 and 0.80, 0.89.
+  - Bagged trees are the same model to within 0.3 Nm in every mode and arm.
+  - Directions per participant, random forest, gauge torque: personalised 4.4 vs population
+    5.3 Nm in walking (lower in 18 of 19); with phase 4.4 vs 4.5 (17 of 19); with mode 4.77 vs
+    4.82 over all modes (19 of 19). So for a forest, phase and mode add little once it has the
+    two legs' angles and velocities, the gait state and the load split: it can read them off.
+  - Cost: the random forest's val run took 22 minutes, bagged trees 71 (8 threads). Inference
+    0.6–0.7 ms per stride, against 0.06 for ridge.
+
+### K6: a held-out check of the twin: the load split between the feet (`track.py load`, 2026-11-11)
+
+ExoGait has no ground reaction forces, but `StanceInterpolationFactor` is one foot's share of
+the vertical force, measured by the footplates (J1b). In the data it is the **right** foot's
+share: 1 in right single support, 0 in left. The tracking never sees it, so it tests what the
+twin had to make up: its contact forces.
+
+- **Method.** For each `measured` walking solve that passes K5's checks (34: SM 16, TR 18), the
+  model's share is right / (right + left) vertical contact force along the solved stride. The
+  measured one is the mean of `stance_alpha` over the participant's kept right strides of that
+  condition. Both on 101 points, compared by correlation and RMSE.
+- **Result.** r = 0.90 (median; quartiles 0.86–0.92; range 0.70–0.97). RMSE 0.19 of the share
+  (0.12–0.29), where the measured share itself varies by 0.09 from stride to stride. SM and TR
+  alike (r 0.90 and 0.91). Lowest: AB75 SM (0.70), the slowest walker, and AB73 SM (0.78).
+- **Where it is right:** both single-support phases, and when each begins and ends. The model
+  walks at its own speed and puts its feet down at its own instants, and they agree with the
+  footplates (`figures/k6_load_split.png`).
+- **Where it is wrong: the hand-over.** In the data the load moves smoothly from one foot to the
+  other over about a third of the stride. In the model the incoming foot takes half the load
+  at once when it lands, gives most of it back, and only then takes over: a bounce at about
+  45–50% of the stride, and a smaller one just before the right heel strike. At the right heel
+  strike itself the footplates already read 0.35, the model 0.02 in SM (0.36 in TR).
+  - This is the contact model (four stiff spheres under rigid feet with a welded toe joint), not
+    the tracking. It is the first measured evidence of what the twin's ground forces get wrong,
+    and it bears on effort: a bounce is paid for by muscles.
+  - It also says the measured share could be tracked (a `MocoContactTrackingGoal`-like term on
+    the split), which would constrain the one thing the solve is free to invent. Not done.
+- `results/exogait/moco/load_split.csv` has a row per solve.
+
+### K3 and J7: the test blocks, scored once (`evaluate.py --test`, `stats.py test`, 2026-11-11)
+
+Every model was refitted on train + val and scored on the test blocks, all 19 participants. Model
+choices and the primary endpoints were fixed on the validation blocks first. Tables:
+`results/exogait/stats/test_*.csv`; figures: `figures/exogait/test_*.png`.
+
+- **RMSE in Nm, full inputs** (the mean over participants, controllers and joints):
+
+  | Torque | Scheme | Model | walk | ramp up | ramp down | stairs up | stairs down |
+  |---|---|---|---|---|---|---|---|
+  | gauge | personalised | phase mean | 7.7 | 8.4 | 8.7 | 7.4 | 10.2 |
+  | gauge | personalised | ridge | 6.5 | 7.3 | 7.4 | 9.3 | 10.3 |
+  | gauge | personalised | random forest | 3.8 | 4.5 | 4.7 | 4.5 | 6.5 |
+  | gauge | personalised | LSTM | 2.4 | 2.9 | 3.0 | 3.0 | 4.0 |
+  | gauge | population | phase mean | 9.9 | 10.0 | 10.5 | 9.3 | 11.8 |
+  | gauge | population | ridge | 7.9 | 8.2 | 8.4 | 10.2 | 11.0 |
+  | gauge | population | random forest | 5.5 | 5.8 | 5.9 | 5.7 | 7.5 |
+  | gauge | population | LSTM | 4.0 | 4.3 | 4.4 | 4.3 | 5.0 |
+  | motor | personalised | ridge | 8.9 | 9.9 | 9.9 | 10.7 | 11.1 |
+  | motor | personalised | random forest | 6.2 | 7.3 | 7.4 | 6.7 | 8.4 |
+  | motor | personalised | LSTM | 4.8 | 5.4 | 5.6 | 4.8 | 5.6 |
+  | motor | population | ridge | 9.7 | 10.5 | 10.5 | 11.2 | 11.5 |
+  | motor | population | random forest | 7.1 | 7.8 | 8.1 | 7.0 | 8.8 |
+  | motor | population | LSTM | 5.8 | 6.3 | 6.5 | 5.6 | 6.3 |
+
+  Bagged trees are within 0.2 Nm of the random forest. The motor torque's phase mean is 15–18 Nm.
+- **Walking R² (median; hip, knee), gauge torque:** LSTM 0.97, 0.94 personalised and 0.92, 0.86
+  population; random forest 0.90, 0.89 and 0.81, 0.76; ridge 0.72, 0.65 and 0.62, 0.49. Motor
+  torque, LSTM: 0.92, 0.95 and 0.89, 0.92. Walking nRMSE of the personalised LSTM: 0.028 (gauge).
+- **H1, primary** (LSTM, gauge torque, walking, per participant): personalised 2.36 vs
+  population 3.80 Nm, lower in 19 of 19, p = 3.8e-6, r = 1.00. The personalised LSTM is the
+  population model fine-tuned on the participant's blocks (a median of 67 epochs; never zero).
+  Every other model agrees (18–19 of 19 on both torques). Of 219 secondary comparisons, 137 are
+  significant after Holm, none against the hypothesis.
+- **H2, primary** (random forest, personalised, gauge, walking): with phase 3.68 vs without
+  4.02 Nm, 19 of 19, p = 3.8e-6, r = 1.00. Secondary: 238 of 351 significant, none against. The
+  size depends on the model: 7.6 vs 11.9 Nm for the phase mean, 6.5 vs 7.2 for ridge, 0.3 Nm for
+  a forest, which can read phase off the other inputs.
+- **H3, primary** (LSTM, personalised, gauge, all five modes): with mode 2.81 vs without
+  2.95 Nm, 18 of 19, p = 7.6e-6, r = 0.99. Consistent but small: 0.14 Nm. Secondary: 66 of 439
+  significant, none against. Only the phase mean needs the mode (7.8 vs 9.3 Nm).
+- **Acceleration (exploratory):** lower with it in 19 of 19 for every model that can use it, on
+  both torques. Motor torque, walking, personalised: ridge 9.2 vs 16.0 Nm, random forest 6.1 vs
+  9.9, LSTM 4.9 vs 5.3. The LSTM needs it least: it sees the velocity sequence.
+- **Validation flattered nothing:** test errors are below the validation ones for the forests
+  and the LSTM (the final models are fitted on two thirds of the data, not one) and within 0.1 Nm
+  of them for ridge.
+- **Cost.** Inference per stride: 0.04 ms (phase mean), 0.07 (ridge), 0.3 (LSTM, GPU), 0.5–0.6
+  (forests). The test pass took 2 h 10 min for the per-row models (8 threads) and about 1 h 20 min
+  for the LSTM.
+- **One crash.** The LSTM's test run died without a message after two participants (exit code 1,
+  no traceback). The rest ran one process per participant with no failure. Not explained.
+- **The per-row models' prediction files** (`<model>_<ID>_pred.csv` of phase mean, ridge, rf,
+  bag) carry `t` to 6 significant digits only: they were written before the writer was fixed.
+  Join on `stride, phase` to the strides file for the clock, as `assist.ai_torque()` does. The
+  LSTM's files are exact.
+
+### K7: the AI torque replayed in the twin (`assist.py ai`, 2026-11-11)
+
+The personalised LSTM's predicted joint-output torque on the test strides (SM walking), averaged
+onto the right-heel-strike stride for the four actuators, replaces the measured torque in K5's
+solve. Two starts, as for `measured`. 16 participants; `results/exogait/moco/ai.csv`.
+
+- **The predicted mean torque is 1.2 Nm RMS off the measured one** on the same strides (median;
+  0.7–1.9), over 4–23 test strides per participant.
+- **Replayed, it gives the same effort as the measured torque:** −1.4% (median; −4.2 to +5.4%),
+  lower in 9 of 15, Wilcoxon p = 0.36. So in simulation the AI torque layer stands in for the
+  measured assistance (RO4).
+- **HL03 is out:** its solve converged (effort 0.492 against 0.516 measured) but the replayed
+  torque is 1.2 Nm RMS off the prescribed one at the hips, over K5's 1 Nm check. The check was
+  not loosened. HL03's `measured` solve sits at 0.87 Nm: 50 mesh intervals are coarse for it.
+- The test strides' measured mean differs from K5's all-clean-strides mean by 2.3 Nm RMS
+  (1.5–5.5): the stride selection matters more than the model's error.
+- The `ai` path was checked first: handed the measured torque it reproduces the `measured`
+  solve (objective 1.01936 vs 1.01941).
+- J7's H4 numbers on absolute effort: optimised vs measured 0.268 vs 0.438 (16 of 16, p =
+  3.1e-5); measured vs exo off p = 0.011 (the report's 0.0092 was on percent changes).
+
 ---
+
+### K6: the twin scaled to each participant (2026-11-11)
+
+`EXOGAIT_SCALED=1` (`track.scaled`): segment lengths by height / 1.80 m, body mass set to the
+published one, muscle maximum forces by mass / 62 kg, the X2 unscaled at 20.7 kg. Solves in
+`results/exogait/moco_scaled/`, beside the generic ones. Same pipeline as K5–K7: `measured` SM and
+TR from the seed, then `none`, `measured`, `optimised` on SM, second starts, then `ai`. No
+exo-off TR solves on the scaled bodies yet.
+
+| | Generic body | Scaled body |
+|---|---|---|
+| `measured` walking solves passing K5's checks | 34 of 38 | 35 of 37 (AB82 SM is the stuck gauge and cannot run; HL05 misses the checks in both modes, as on the generic body) |
+| Tracking error, median: hip L/R, knee L/R (deg) | 0.64 / 0.59, 0.46 / 0.31 | 0.56 / 0.57, 0.39 / 0.29 |
+| Load split against the footplates: r, RMSE (median) | 0.90, 0.19 (34 solves) | 0.91, 0.18 (35 solves) |
+| H4 primary, optimised vs measured effort | 0.268 vs 0.438, 16 of 16, p = 3.1e-5 | 0.272 vs 0.424, 16 of 16, p = 3.1e-5 |
+| Optimised vs measured, median of participants | −33.6% | −33.9% (range −23.6 to −49.9%) |
+| Measured vs exo off | 0.438 vs 0.474, 14 of 16, p = 0.011 | 0.424 vs 0.471, 14 of 16, p = 0.0021 |
+
+- **H4 does not depend on the generic body.** Same direction in every participant, the same
+  median saving, on bodies of 51 to 90 kg.
+- **Which participants are in the 16 changes by one each way.** HL01 SM passes the tracking check
+  when scaled (it missed at 3.13° on the generic body). AB75's `optimised` solve ends with the
+  stride length on its bound when scaled, so AB75 drops out. HL05 SM misses the check on both
+  (3.8° scaled, 4.2° generic).
+- **Scaling moves each person's effort the way their weight says it should.** Measured-torque
+  effort, scaled against generic, 15 participants: from −31% (AB73) and −20% (AB68, 90 kg) to
+  +17% (AB71, 55 kg) and +29% (AB70, 51 kg). Spearman ρ with body mass −0.63 (p = 0.011). The X2
+  weighs 20.7 kg whoever wears it, so it is 41% of AB70's weight and 23% of AB68's. The group
+  median barely moves (0.414 against 0.407, p = 0.2).
+- **AB73 is not explained by mass** (70 kg, 1.78 m, −31%). The two solves differ by more than the
+  body; they may sit in different local solutions. Not chased.
+- **The foot hand-over bounce is still there** on scaled bodies (at heel strike the measured share
+  is 0.35, the model's 0.19): it is the contact model, not the body size.
+- Mass and height are correlated in this group, so the effect of one cannot be told from the other.
+- Figures: `figures/exogait/h4_scaled.png`, `figures/k6_load_split_scaled.png`. Tables:
+  `results/exogait/stats/h4_scaled.csv`, `moco_scaled/load_split.csv`.
+- The run stopped between about 05:40 and 11:30 (the laptop slept despite the keep-awake wrapper)
+  and picked up by itself.
+- **The `ai` case on the scaled bodies (later the same day,** `EXOGAIT_SCALED=1 assist.py ai`,
+  `moco_scaled/ai.csv`**):** effort with the LSTM's torque against the measured torque: median
+  −1.8% (range −3.7 to +6.7%), lower in 9 of 15, p = 0.89. Generic body: −1.4%, 9 of 15, p = 0.36.
+  The same conclusion. HL03 fails the replay check again ("exo torque is not the prescribed
+  torque"), as on the generic body, so it is something in HL03's predicted torque, not the body.
 
 ## Open questions
 

@@ -39,6 +39,7 @@ from pathlib import Path
 import numpy as np
 import opensim as osim
 
+import preprocess
 import x2model
 
 MOCO = x2model.OUT / "moco"
@@ -59,6 +60,46 @@ VALUE = {"pelvis_tilt": "/jointset/groundPelvis/pelvis_tilt", "pelvis_tx": "/joi
                                                                     ("ankle", "ankle_angle")) for s in "lr"}}
 EXO = {f"exo_{j}_{s}": f"{c}_{s}" for j, c in (("hip", "hip_flexion"), ("knee", "knee_angle")) for s in "lr"}
 BOUNDS = {"hip_flexion": (-25, 95), "knee_angle": (-120, 10), "ankle_angle": (-30, 30)}   # deg
+SCALE = 1.0          # segment lengths against the generic model's: 1 unless scaled() has run
+GENERIC = (1.80, 62.0)   # the generic 2D_gait: its mass, and the height its segments suggest (hip axis at 0.935 m standing)
+
+
+def scaled(subj):
+    """K6: switch this process to the twin scaled to one participant (Lhoste et al. 2026, Table 2): segment lengths by
+    height / GENERIC height, body mass set to the participant's (mass distribution kept), muscle fibre and tendon
+    lengths with their paths (OpenSim's Model.scale), maximum isometric forces by the mass ratio (muscle volume
+    goes with mass x height, fibre length with height). The X2 is added afterwards, unscaled: 20.7 kg for everyone.
+    Solves then go to results/exogait/moco_scaled/, beside the generic ones.
+    ponytail: one uniform factor from stature. Segment-wise factors need leg lengths, which nobody measured."""
+    global MODEL, MOCO, SCALE
+    with open(x2model.ROOT / "models" / "exogait" / "participants.csv") as f:
+        person = next(r for r in csv.DictReader(f) if r["participant"] == subj)
+    SCALE, mass = float(person["height_m"]) / GENERIC[0], float(person["mass_kg"])
+    MOCO = x2model.OUT / "moco_scaled"
+    MODEL = x2model.OUT / "model" / f"2D_gait_x2_{subj}.osim"
+    if not MODEL.exists():
+        model = osim.Model(str(x2model.BASE))
+        state = model.initSystem()
+        factors = osim.ScaleSet()
+        for i in range(model.getBodySet().getSize()):
+            s = osim.Scale()
+            s.setSegmentName(model.getBodySet().get(i).getName())
+            s.setScaleFactors(osim.Vec3(SCALE))
+            s.setApply(True)
+            factors.cloneAndAppend(s)
+        model.scale(state, factors, True, mass)
+        for c in model.getComponentsList():
+            m = osim.Muscle.safeDownCast(model.updComponent(c.getAbsolutePathString()))
+            if m:
+                m.setMaxIsometricForce(m.getMaxIsometricForce() * mass / GENERIC[1])
+        base = MODEL.with_name(f"2D_gait_{subj}.osim")
+        MODEL.parent.mkdir(parents=True, exist_ok=True)
+        model.printToXML(str(base))
+        x2model.build_model(MODEL, base)
+        check = osim.Model(str(MODEL))
+        got = check.getTotalMass(check.initSystem())
+        assert abs(got - mass - x2model.X2_MASS) < 0.01, f"scaled model weighs {got} kg, not {mass} + {x2model.X2_MASS}"
+    return SCALE, mass
 
 
 def stride_length(m):
@@ -68,7 +109,7 @@ def stride_length(m):
     def ankle_x(s):
         thigh = (m["pelvis_tilt"] + m[f"hip_flexion_{s}"]) * DEG
         return -0.0045 * np.cos(thigh) + 0.3969 * np.sin(thigh) + 0.4157 * np.sin(thigh + m[f"knee_angle_{s}"] * DEG)
-    return float(np.ptp(ankle_x("r") - ankle_x("l")))
+    return SCALE * float(np.ptp(ankle_x("r") - ankle_x("l")))
 
 
 def lowpass(y, T, hz=6.0):
@@ -92,7 +133,17 @@ def peak_mem_gb():
     return pmc.peak / 2 ** 30
 
 
-def solve(subj="HL03", cond="SM_WALKING", n_mesh=50, guess=SEED, case="measured", exo_w=None, max_iter=3000):
+def ground_forces(model, sol):
+    """The vertical ground reaction on each foot along a solution: time [s] and {side: force [N]}, from the contact spheres."""
+    names = [osim.StdVectorString(), osim.StdVectorString()]
+    for v, s in zip(names, "rl"):
+        v.append(f"contactHeel_{s}")
+        v.append(f"contactFront_{s}")
+    grf = osim.createExternalLoadsTableForGait(model, sol, *names)
+    return np.array(grf.getIndependentColumn()), {s: grf.getDependentColumn(f"ground_force_{s}_vy").to_numpy() for s in "rl"}
+
+
+def solve(subj="HL03", cond="SM_WALKING", n_mesh=50, guess=SEED, case="measured", exo_w=None, max_iter=3000, prescribed=None):
     """One solve. Returns the summary row (dict); the solution is written to MOCO.
     guess: a solved .sto of the same model (any stride) to start from, stretched onto this stride.
            None starts from the tracked states: how the seed was first made, but it usually wanders.
@@ -104,19 +155,21 @@ def solve(subj="HL03", cond="SM_WALKING", n_mesh=50, guess=SEED, case="measured"
                           in the effort goal. assist.py sets those prices so that each actuator spends the
                           measured torque's budget (the integral of its square): the optimum under that budget.
                           Moco 4.6 cannot constrain the integral itself (MocoControlGoal has no constraint mode,
-                          and MocoOutputGoal on |actuation hits a stale-cache error)."""
+                          and MocoOutputGoal on |actuation hits a stale-cache error).
+               ai         the exo replays `prescribed`, {actuator: Nm on x2model.P}: K3's predicted torque
+                          (assist.ai_torque). Replayed exactly, like `measured`, and not held to the budget."""
     name = f"{subj}_{cond}_mean_{case}_m{n_mesh}"
     cwd, work = os.getcwd(), MOCO / "work" / name
     work.mkdir(parents=True, exist_ok=True)
     guess = guess and str(Path(guess).resolve())
     os.chdir(work)   # MocoTrack and the solver write <name>_tracked_states.sto and a stop file into the cwd
     try:
-        return _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name)
+        return _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name, prescribed)
     finally:
         os.chdir(cwd)
 
 
-def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name):
+def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name, prescribed=None):
     MODEL.exists() or x2model.build_model(MODEL)
     r = x2model.map_x2(subj, cond)
     mean, P = r["mean"], x2model.P
@@ -169,7 +222,10 @@ def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name):
     stuck = [a for a, v in measured.items() if np.ptp(v) < 1.0]   # AB82's left-knee gauge reads -12.07 Nm throughout SM
     assert not stuck or case == "none", f"{subj} {cond}: the gauge torque at {stuck} is constant: a stuck channel, nothing to replay"
     budget = {a: float(np.trapezoid(v ** 2, P * T)) for a, v in measured.items()}   # Nm^2 s
-    tau = {"measured": measured, "none": {a: 0 * v for a, v in measured.items()}, "ideal": {}, "optimised": {}}[case]
+    tau = {"measured": measured, "none": {a: 0 * v for a, v in measured.items()}, "ideal": {}, "optimised": {},
+           "ai": {a: lowpass(v, T) for a, v in (prescribed or {}).items()}}[case]
+    assert case != "ai" or (set(tau) == set(EXO) and max(np.abs(v).max() for v in tau.values()) < x2model.X2_TORQUE), \
+        "`ai` needs a torque for each of the four actuators, within the X2 limit"
     for a, v in tau.items():
         f = osim.PiecewiseLinearFunction()
         for ti, ui in zip(P * T, v / x2model.EXO_F):
@@ -195,7 +251,7 @@ def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name):
     lo, hi = mean["pelvis_tilt"].min() - 10, mean["pelvis_tilt"].max() + 10
     problem.setStateInfo(f"{VALUE['pelvis_tilt']}/value", [lo * DEG, hi * DEG])
     problem.setStateInfo(f"{VALUE['pelvis_tx']}/value", [-0.2, 1.5 * L], 0, [STRIDE[0] * L, STRIDE[1] * L])
-    problem.setStateInfo(f"{VALUE['pelvis_ty']}/value", [0.75, 1.25])
+    problem.setStateInfo(f"{VALUE['pelvis_ty']}/value", [0.75 * SCALE, 1.25 * SCALE])
     problem.setStateInfo(f"{VALUE['lumbar']}/value", [0, 20 * DEG])
     for c, (a, b) in BOUNDS.items():
         for s in "lr":
@@ -214,6 +270,8 @@ def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name):
         for s in g.getStateNames():
             if s.endswith("/speed"):
                 g.setState(s, np.array(g.getStateMat(s)) / k)
+            if "pelvis_t" in s and "tilt" not in s and SCALE != 1 and Path(guess).resolve() == SEED.resolve():
+                g.setState(s, np.array(g.getStateMat(s)) * SCALE)   # the generic seed's pelvis path, on a scaled body
         g.write("guess.sto")
         solver.setGuessFile("guess.sto")   # as a file: read at solve time, once the problem is final
     else:
@@ -221,8 +279,8 @@ def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name):
         tg = g.getTimeMat()
         g.setState(f"{VALUE['pelvis_tx']}/value", L * tg / T)
         g.setState(f"{VALUE['pelvis_tx']}/speed", np.full(len(tg), L / T))
-        g.setState(f"{VALUE['pelvis_ty']}/value", np.full(len(tg), 0.90))   # straight-leg standing height is 0.935 m
-        assert abs(np.array(solver.getGuess().getStateMat(f"{VALUE['pelvis_ty']}/value"))[0] - 0.90) < 1e-12, "guess not applied"
+        g.setState(f"{VALUE['pelvis_ty']}/value", np.full(len(tg), 0.90 * SCALE))   # straight-leg standing height is 0.935 m
+        assert abs(np.array(solver.getGuess().getStateMat(f"{VALUE['pelvis_ty']}/value"))[0] - 0.90 * SCALE) < 1e-12, "guess not applied"
 
     tic = time.perf_counter()
     sol = study.solve()
@@ -261,14 +319,9 @@ def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name):
     for c in ("ankle_angle_l", "ankle_angle_r", "lumbar"):
         row[f"min_{c}"], row[f"max_{c}"] = round(val(c).min(), 1), round(val(c).max(), 1)
     row["min_pelvis_ty"] = round(float(np.array(sol.getStateMat(f"{VALUE['pelvis_ty']}/value")).min()), 3)
-    names = [osim.StdVectorString(), osim.StdVectorString()]
-    for v, s in zip(names, "rl"):
-        v.append(f"contactHeel_{s}")
-        v.append(f"contactFront_{s}")
-    grf = osim.createExternalLoadsTableForGait(model, sol, *names)
     bw = model.getTotalMass(model.getWorkingState()) * 9.80665
-    for s in "rl":
-        row[f"peak_grf_bw_{s}"] = round(grf.getDependentColumn(f"ground_force_{s}_vy").to_numpy().max() / bw, 3)
+    for s, f in ground_forces(model, sol)[1].items():
+        row[f"peak_grf_bw_{s}"] = round(f.max() / bw, 3)
     try:
         check(row | {"_range": {c: (val(c).min(), val(c).max()) for c in VALUE if c not in ("pelvis_tx", "pelvis_ty")},
                      "_pelvis_bounds": (lo, hi)})
@@ -305,10 +358,10 @@ def check(row):
     assert 0.55 * row["stride_len_fk"] < row["stride_len"] < 1.25 * row["stride_len_fk"], "stride length on its bound"
     assert all(v < 1 for k, v in row.items() if k.startswith("replay_rmse") and v != ""), "exo torque is not the prescribed torque"
     for a in EXO:   # the mesh's quadrature and the 101-point budget differ by a hair
-        assert row[f"exo_int2_{a}"] <= 1.02 * row[f"exo_budget_{a}"] + 0.5 or row["case"] in ("measured", "ideal"), f"{a} over its budget"
+        assert row[f"exo_int2_{a}"] <= 1.02 * row[f"exo_budget_{a}"] + 0.5 or row["case"] in ("measured", "ideal", "ai"), f"{a} over its budget"
     joint = [v for k, v in row.items() if k.startswith("reserve_rms") and "pelvis" not in k]
     assert max(joint) < 5, f"joint reserves up to {max(joint)} Nm RMS"
-    assert max(row["peak_grf_bw_r"], row["peak_grf_bw_l"]) < 2.5 and row["min_pelvis_ty"] > 0.8, "not walking on its feet"
+    assert max(row["peak_grf_bw_r"], row["peak_grf_bw_l"]) < 2.5 and row["min_pelvis_ty"] > 0.8 * SCALE, "not walking on its feet"
 
 
 def plot(subj, cond, n_mesh=50, case="measured"):
@@ -338,15 +391,10 @@ def plot(subj, cond, n_mesh=50, case="measured"):
     axs[1, 0].set_ylabel("deg")
     model = osim.ModelProcessor(str(MODEL)).process()
     model.initSystem()
-    names = [osim.StdVectorString(), osim.StdVectorString()]
-    for v, s in zip(names, "rl"):
-        v.append(f"contactHeel_{s}")
-        v.append(f"contactFront_{s}")
-    grf = osim.createExternalLoadsTableForGait(model, sol, *names)
     bw = model.getTotalMass(model.getWorkingState()) * 9.80665
-    tg = 100 * np.array(grf.getIndependentColumn()) / t[-1]
+    tg, force = ground_forces(model, sol)
     for s in "rl":
-        axs[1, 1].plot(tg, grf.getDependentColumn(f"ground_force_{s}_vy").to_numpy() / bw, color=color[s], lw=2.2, label=f"model ({s.upper()})")
+        axs[1, 1].plot(100 * tg / t[-1], force[s] / bw, color=color[s], lw=2.2, label=f"model ({s.upper()})")
     axs[1, 1].set_title("vertical ground reaction (not recorded: estimated)", fontsize=10)
     axs[1, 1].set_ylabel("body weights (model + X2)")
     for a, c in EXO.items():
@@ -447,13 +495,76 @@ def moment_vs_torque(subj, n_mesh=50):
     return rows, png
 
 
+def load_split(subj, cond, n_mesh=50, case="measured"):
+    """K6, a held-out check: the right foot's share of the vertical ground force through the stride. The model's
+    comes from the solution's contact forces. The measured one is StanceInterpolationFactor, which the X2 computes
+    from the force sensors in its footplates (Lhoste et al. 2026); in the data it is 1 in right single support
+    and 0 in left. The tracking never sees it. Returns the measured mean and SD over the kept right strides
+    (preprocess.py) and the model's share, all on x2model.P."""
+    d = preprocess.read_strides([subj], usecols=["leg", "mode", "controller", "stance_alpha"])
+    a = d[(d.leg == "R") & (d["mode"] == "walk") & (d.controller == preprocess.CONTROLLERS[cond.split("_")[0]])]
+    a = a.stance_alpha.to_numpy().reshape(-1, 101)
+    if os.environ.get("EXOGAIT_SCALED"):
+        scaled(subj)   # this participant's model
+    proc = osim.ModelProcessor(str(MODEL))
+    proc.append(osim.ModOpAddReserves(1.0, 1000.0, False))
+    model = proc.process()
+    model.initSystem()
+    t, f = ground_forces(model, osim.MocoTrajectory(str(MOCO / f"{subj}_{cond}_mean_{case}_m{n_mesh}.sto")))
+    return a.mean(0), a.std(0, ddof=1), np.interp(x2model.P, t / t[-1], f["r"] / np.maximum(f["r"] + f["l"], 1e-9))
+
+
+def load_splits(n_mesh=50):
+    """K6: load_split() for every `measured` walking solve that passes K5's checks -> moco/load_split.csv and
+    figures/k6_load_split.png."""
+    import matplotlib.pyplot as plt
+    rows, curves = [], {c: [] for c in x2model.WALKING}
+    with open(MOCO / "summary.csv") as f:   # the last row per solve says whether it passed K5's checks
+        verdict = {(r["participant"], r["condition"]): r["check"] for r in csv.DictReader(f)
+                   if r["case"] == "measured" and int(r["n_mesh"]) == n_mesh}
+    for (subj, cond), check in sorted(verdict.items()):
+        if check != "ok" or cond not in x2model.WALKING:
+            continue
+        m, sd, share = load_split(subj, cond, n_mesh)
+        rows.append(dict(participant=subj, condition=cond, r=round(float(np.corrcoef(m, share)[0, 1]), 3),
+                         rmse=round(float(np.sqrt(np.mean((m - share) ** 2))), 3), stride_sd=round(float(sd.mean()), 3),
+                         measured_at_heel_strike=round(float(m[0]), 2), model_at_heel_strike=round(float(share[0]), 2)))
+        curves[cond].append((m, share))
+    with open(MOCO / "load_split.csv", "w", newline="") as f:
+        wr = csv.DictWriter(f, fieldnames=list(rows[0]))
+        wr.writeheader()
+        wr.writerows(rows)
+    fig, axs = plt.subplots(1, 2, figsize=(12, 4.2), sharey=True)
+    for ax, cond in zip(axs, ("SM_WALKING", "transparent_WALKING")):
+        m, share = (np.array(v) for v in zip(*curves[cond]))
+        x = 100 * x2model.P
+        for y, col, lab in ((m, "#52514e", "measured by the footplates (StanceInterpolationFactor)"), (share, "#2a78d6", "model: contact forces of the solved stride")):
+            ax.fill_between(x, y.mean(0) - y.std(0), y.mean(0) + y.std(0), color=col, alpha=0.16, lw=0)
+            ax.plot(x, y.mean(0), color=col, lw=2.2, label=lab + ", mean ± SD over participants")
+        r = np.median([q["r"] for q in rows if q["condition"] == cond])
+        ax.set_title(f"{'State machine' if cond.startswith('SM') else 'Transparent'}: {len(m)} participants, median r = {r:.2f}", fontsize=10, loc="left")
+        ax.set_xlabel("% of the stride, from right heel strike")
+        ax.grid(alpha=0.25)
+    axs[0].set_ylabel("right foot's share of the vertical ground force")
+    fig.legend(*axs[0].get_legend_handles_labels(), loc="lower center", ncol=2, frameon=False, fontsize=9)
+    fig.suptitle("A held-out check of the twin: the load split between the feet. The tracking never sees the footplate signal", fontsize=11, x=0.01, ha="left")
+    fig.tight_layout(rect=(0, 0.07, 1, 0.94), w_pad=1.5)
+    png = x2model.ROOT / "figures" / f"k6_load_split{'_scaled' if SCALE != 1 else ''}.png"
+    fig.savefig(png, dpi=130)
+    plt.close(fig)
+    return rows, png
+
+
 def params():
     """K6: results/exogait/params.csv, one row per participant: what the twin uses for them."""
     rows = []
+    with open(x2model.ROOT / "models" / "exogait" / "participants.csv") as f:   # Lhoste et al. 2026 (JNER 23:114), Table 2
+        people = {r["participant"]: r for r in csv.DictReader(f)}
     for f in sorted((x2model.ROOT / "data" / "raw" / "exogait").glob("*_ExoGait-Benchmark.csv")):
         subj = f.name[:4]
-        row = dict(participant=subj, site=subj[:2], body_mass_kg=62.0, x2_mass_kg=x2model.X2_MASS,
-                   anthropometry="generic 2D_gait (ExoGait records none; J1b pending)")
+        row = dict(participant=subj, site=subj[:2], **{k: people[subj][k] for k in ("sex", "age_y", "height_m", "mass_kg")},
+                   model_mass_kg=62.0, x2_mass_kg=x2model.X2_MASS,
+                   anthropometry="measured: Lhoste 2026 Table 2. The model is still the generic 2D_gait, not scaled")
         for cond in x2model.WALKING:
             r, k = x2model.map_x2(subj, cond), cond.split("_")[0][:2].upper()
             L = stride_length(r["mean"])
@@ -475,6 +586,17 @@ if __name__ == "__main__":
         assert len(rows) == 19 and all(-30 < r["hip_offset_c_deg"] < 5 for r in rows), "params: 19 participants, c in range"
         print(f"OK: {out}: {len(rows)} participants, c {min(r['hip_offset_c_deg'] for r in rows)}..{max(r['hip_offset_c_deg'] for r in rows)} deg")
         sys.exit()
+    if sys.argv[1:2] == ["load"]:   # track.py load: every `measured` walking solve on disk
+        if os.environ.get("EXOGAIT_SCALED"):
+            scaled("HL03")   # points MOCO at moco_scaled/; load_split() then takes each participant's own model
+        rows, png = load_splits()
+        r = np.array([q["r"] for q in rows])
+        assert len(rows) >= 30 and np.median(r) > 0.7, f"the model's load split does not follow the footplates: median r {np.median(r):.2f}"
+        print(f"OK: {len(rows)} solves; r median {np.median(r):.2f}, range {r.min():.2f}..{r.max():.2f}; RMSE median "
+              f"{np.median([q['rmse'] for q in rows]):.2f} of the share (stride-to-stride SD {np.median([q['stride_sd'] for q in rows]):.2f}); "
+              f"at heel strike: measured {np.median([q['measured_at_heel_strike'] for q in rows]):.2f}, model "
+              f"{np.median([q['model_at_heel_strike'] for q in rows]):.2f} (medians). Figure: {png}")
+        sys.exit()
     if sys.argv[1:2] == ["k6"]:   # track.py k6 [ID]: needs that participant's SM and TR solves
         rows, png = moment_vs_torque(sys.argv[2] if len(sys.argv) > 2 else "HL03")
         print("\n".join(str(r) for r in rows))
@@ -483,6 +605,8 @@ if __name__ == "__main__":
         sys.exit()
     subj = sys.argv[1] if len(sys.argv) > 1 else "HL03"
     cond = sys.argv[2] if len(sys.argv) > 2 else "SM_WALKING"
+    if os.environ.get("EXOGAIT_SCALED"):   # the twin scaled to this participant, into moco_scaled/
+        print("scaled twin: length factor %.3f, body mass %.0f kg" % scaled(subj), flush=True)
     for n_mesh in map(int, (sys.argv[3] if len(sys.argv) > 3 else "50").split(",")):
         guess = SEED if len(sys.argv) < 5 or sys.argv[4] == "seed" else None if sys.argv[4] == "cold" else sys.argv[4]
         row = solve(subj, cond, n_mesh, guess, sys.argv[5] if len(sys.argv) > 5 else "measured")

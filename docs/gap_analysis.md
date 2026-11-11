@@ -134,7 +134,7 @@ The abstract C1/C2/C3 tracks have been replaced. After a full read of Zhang et a
 now framed as a **direct extension of that paper** rather than an independent novelty claim.
 
 See [`mfac_teardown.md`](mfac_teardown.md) for the full teardown and
-[`../PROJECT_GUIDE.md`](../PROJECT_GUIDE.md) for the extension set E1–E8.
+[`guide_v3_fatigue_twin.md`](guide_v3_fatigue_twin.md) (the archived plan) for the extension set E1–E8.
 
 Mapping from the old tracks:
 

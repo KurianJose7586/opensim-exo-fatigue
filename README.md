@@ -1,88 +1,98 @@
 # AI-Driven Human–Exoskeleton Digital Twin
 
-A musculoskeletal digital twin in OpenSim Moco, scaled to a subject, carrying per-muscle fatigue
-dynamics and a lower-limb exoskeleton, used to work out how assistance should be allocated across
-hip, knee and ankle as the person tires — with a learned surrogate standing in for the expensive
-simulation so the loop can close in real time.
+Recordings of 19 people walking in a Fourier X2 hip-and-knee exoskeleton (the ExoGait Benchmark),
+AI models that predict the exoskeleton's torque from them, and an OpenSim Moco model that wears the
+same exoskeleton, reproduces each person's walking, and is used to compare assistance: switched
+off, as measured, as the AI predicts it, and optimised.
 
-**New here?** Start with [`ONBOARDING.md`](ONBOARDING.md) — setup, reading order, and what to pick up.
-**Already up to speed?** [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) is the plan.
+![The model walking with the exoskeleton off, with the measured assistance and with optimised assistance](figures/k7_hl03_sm_walking_stride.gif)
+
+*One participant's mean stride, solved three ways. Muscle colour is activation; the orange wedges
+are the exoskeleton's torque. Simulation.*
+
+**New here?** [`ONBOARDING.md`](ONBOARDING.md): setup, reading order, rules.
+**The plan and where it stands:** [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md).
+**The task lists:** [`docs/KURIAN_TASKS.md`](docs/KURIAN_TASKS.md), [`docs/JASITH_TASKS.md`](docs/JASITH_TASKS.md).
 
 ---
 
-## Status
+## Status (2026-11-11)
 
-**Whole pipeline built and smoke-tested end to end (2026-10-02). What remains is DGX compute.**
-Runbook for the supervisor: [`docs/RUN_ON_DGX.md`](docs/RUN_ON_DGX.md) — one image, one script.
-
-| Phase | Code | State |
+| Part | Code | State |
 |---|---|---|
-| A — OpenSim twin | `src/musculoskeletal/twin.py` | **Gate A passed.** 2D model + 3-joint exo + device mass, MocoInverse converges, 26–42 s per evaluation on a laptop |
-| B — fatigue | `src/fatigue/` | Validated earlier (bit-exact vs authors' code; 0.6% held-out) |
-| C — allocation | `src/allocation/` | **Run on the twin:** coupled min-max allocation cuts worst-muscle fatigue 60% vs none, 9% below independent per-joint control, same budget (`notes/results.md` §7) |
-| D1 — dataset | `src/jobs/sweep.py`, `configs/` | Resumable sharded sweep; smoke tier 18/18 converged, 6 KB per solve |
-| D2 — surrogate | `src/activation/surrogate.py` | Ensemble, subject-held-out split; R² 0.999 on toy, runs on twin data |
-| D3 — RL policy | `src/activation/policy.py` | SAC in the surrogate, disagreement penalty; runs end to end |
-| D4 — validation | `src/activation/validate.py` | Closed loop against the twin, benefit retention, latency |
-| E — MATLAB | — | Supervisor's track |
+| Preprocessing and splits | `preprocess.py`, `split.py` | **Done**, all 19: 5,964 strides, whole-block train/val/test |
+| Torque models | `evaluate.py`, `lstm.py` | **Done.** Phase mean, ridge, random forest, bagged trees, LSTM, scored once on held-out test blocks. Personalised LSTM: 2.4 Nm in walking (R² 0.97 hip, 0.94 knee); for an unseen person 4.0 Nm |
+| The twin | `x2model.py`, `track.py` | **Reproduces walking** for all 19 in both controller modes (hip 0.6°, knee 0.4° median error), on a generic body |
+| Assistance in simulation | `assist.py` | **First result:** an optimised torque with the measured torque's budget lowers simulated muscle effort by 34% (16 of 16 participants). The AI's torque, replayed, matches the measured torque's effort (−1.4%) |
+| Statistics | `stats.py` | **Done** for H1–H4: all four supported; H2 and H3 are small effects for the strong models |
+| EMG | — | **Blocked:** not in the public dataset |
 
-Not done, needs a person: Camargo data loading and per-subject scaling (supervisor), the B4
-squat re-validation through OpenSim, the arXiv novelty check, and a *measured* recovery rate R.
-R = 0.5 is traced to Ma et al. 2010, which borrows it too; the Phase C ranking holds across the
-plausible range (`notes/results.md` §8).
+Reports for the faculty are in [`docs/reports/`](docs/reports/). Every number and how it was
+obtained: [`notes/observations.md`](notes/observations.md).
 
 ## Layout
 
 ```
-notes/      rough running log: findings, results, observations, decisions
-docs/       teardowns of the anchor papers, gap analysis
-src/        code, one directory per extension area
-models/     OpenSim models: base / scaled to subject / with exoskeleton
-data/       raw datasets and processed OpenSim inputs   (gitignored)
-results/    simulation outputs                          (gitignored)
-figures/    plots for the paper
-refs/       papers, kept locally                        (gitignored)
-external/   third-party reference code (see NOTICE)
+src/exogait/   the project: one file per job, each with a self-check
+docs/          task lists, data guide, allowed model inputs, reports
+notes/         running log: observations, decisions, papers
+models/        base OpenSim model, the stored start for solves, the participants' height and mass
+figures/       figures and the film
+data/          raw ExoGait CSVs and processed strides   (gitignored)
+results/       solutions, predictions, tables           (gitignored)
 ```
 
-`src/` areas: `fatigue/` (B) · `mpc/` (published baseline) · `musculoskeletal/` (A) ·
-`allocation/` (C) · `jobs/` (D1 sweeps) · `activation/` (D2–D4).
-`configs/` sweep tiers · `deploy/` Kubernetes manifests · `run_pipeline.sh` every stage.
+`src/fatigue`, `src/mpc`, `src/musculoskeletal`, `src/allocation`, `src/jobs`, `src/activation`,
+`configs/`, `deploy/` and `run_pipeline.sh` belong to the earlier plan and are parked
+([`docs/guide_v3_fatigue_twin.md`](docs/guide_v3_fatigue_twin.md)).
 
 ## Setup
 
+One environment, Python only (no MATLAB). OpenSim is not on PyPI, so it is a micromamba env:
+
 ```bash
-python -m venv .venv && .venv/Scripts/activate && pip install -r requirements.txt
+micromamba create -n opensim -c opensim-org -c conda-forge python=3.11 opensim=4.6 "libblas=*=*openblas" numpy scipy pandas pyyaml matplotlib scikit-learn
 ```
 
-Use `python -m pip`, not bare `pip`. OpenSim is **not** pip-installable and needs its own
-Python 3.11 conda env — exact commands and the Windows traps in [`ONBOARDING.md`](ONBOARDING.md).
-On the DGX everything runs in one image: [`docs/RUN_ON_DGX.md`](docs/RUN_ON_DGX.md).
+```bash
+micromamba run -n opensim python -m pip install torch --index-url https://download.pytorch.org/whl/cu126
+```
 
-## Reference code
+Use `.../whl/cpu` without an NVIDIA GPU. The traps (OpenBLAS not MKL, never conda-install
+casadi) are in [`ONBOARDING.md`](ONBOARDING.md). The raw data is downloaded by hand from
+[Dryad](https://datadryad.org/dataset/doi:10.5061/dryad.70rxwdc6j) into `data/raw/exogait/`.
 
-`external/PHRC/` holds the authors' fatigue-model implementation, included unmodified as our
-validation baseline. **Do not edit it** — our own implementations go in `src/fatigue/`, written from
-the published equations. Editing it would destroy our ability to prove those are correct.
+## Run
 
-Provenance and licensing: [`external/PHRC/NOTICE.md`](external/PHRC/NOTICE.md).
-Parameter values and a confirmed `range(2)` bug:
-[`docs/reference_implementation.md`](docs/reference_implementation.md).
+From the repo root, each through `micromamba run -n opensim python -u`:
+
+| Step | Command | Time |
+|---|---|---|
+| Raw-file checks | `src/exogait/checks.py AB68 HL03` | 1 min each |
+| Strides | `src/exogait/preprocess.py all` | 80 s |
+| Splits | `src/exogait/split.py` | 2 s |
+| Baselines, validation | `src/exogait/evaluate.py all` | 2 min |
+| Forests and LSTM, validation | `src/exogait/evaluate.py all --models rf,bag,lstm` | 3 h |
+| Final scores, test blocks | `src/exogait/evaluate.py all --test --models phase_mean,ridge,rf,bag,lstm` | 5 h |
+| Statistics and figures | `src/exogait/stats.py` | seconds |
+| The X2 model | `src/exogait/x2model.py` | 10 s |
+| One tracking solve | `src/exogait/track.py HL03 SM_WALKING` | 8 min |
+| Assistance cases | `src/exogait/assist.py HL03 SM_WALKING` | 20 min |
+| The film | `src/exogait/animate.py HL03 SM_WALKING` | 4 min |
+
+Running a file with no arguments runs its self-check.
 
 ## Key documents
 
 | File | What it is |
 |---|---|
-| [`ONBOARDING.md`](ONBOARDING.md) | **Start here if you are new** |
-| [`docs/RUN_ON_DGX.md`](docs/RUN_ON_DGX.md) | **Runbook for the DGX runs** |
-| [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) | The plan |
-| [`notes/`](notes/) | **Running log — read this when writing up** |
-| [`docs/mfac_teardown.md`](docs/mfac_teardown.md) | Anchor paper, full read |
-| [`docs/peternel2019_teardown.md`](docs/peternel2019_teardown.md) | Per-muscle model + redistribution precedent |
-| [`docs/reference_implementation.md`](docs/reference_implementation.md) | The authors' code, parameters, bug |
-| [`docs/gap_analysis.md`](docs/gap_analysis.md) | Literature screening (ongoing) |
+| [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md) | The plan, objectives and hypotheses, limits |
+| [`docs/KURIAN_TASKS.md`](docs/KURIAN_TASKS.md), [`docs/JASITH_TASKS.md`](docs/JASITH_TASKS.md) | Tasks, file formats, shared rules |
+| [`docs/model_inputs.md`](docs/model_inputs.md) | What a torque model may see, and why |
+| [`docs/reports/`](docs/reports/) | Progress reports and the messages sent with them |
+| [`notes/`](notes/) | The running log. Read it when writing up |
 
 ## Reproducibility
 
-Every file in `results/` records the git commit and config that produced it. Do not hand-edit
-results.
+Every results file records the git commit that produced it. Raw data is never edited. Do not
+hand-edit `results/`: regenerate it.

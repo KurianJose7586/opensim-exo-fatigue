@@ -456,3 +456,114 @@ the 14 TR pairs the largest change was 5%.
   comparison is conservative for H4.
 - **Next:** a proper multi-start (several starts for every case, the best kept) before any
   effort number is reported as final. It roughly doubles K9's solve count.
+
+### 2026-11-10: Kurian takes J3–J5; the stride, split and scoring rules
+
+**Why.** J3, J4 and J5 had not been started, and K2, K3, K7's `ai` case and K9 all waited on
+them. Kurian asked his side to do them. They are in one PR for Jasith to review. `docs/JASITH_TASKS.md`
+keeps the plan as written and says what was built.
+
+**Stride rules** (`preprocess.py`). Chosen from the data, on five participants first, then
+checked on all 19 (`observations.md`, "K2"):
+- **Complete strides only.** The dataset's own `step_complete` flag decides. It removes the
+  first stride of a pass and the phase wraps while standing. Rejected: a duration rule alone
+  (it cannot tell a first stride from a steady one), and K4's stricter filters (toe-off timing,
+  bout edges, the gyro check), which are for a clean mean stride and would cost the models data.
+- **Duration within 0.5–1.5 of the median complete stride** of that participant, condition and
+  leg. 99% of complete strides are inside 0.70–1.50; the rest are pauses.
+- **Sampling holes:** a stride goes only for a hole over 50 ms (about one phase point of a slow
+  stride) or over 20% missing. Single dropped samples are everywhere and harmless at 101 points.
+- **Order by raw row, not by `t`**: the clock restarts in five files.
+- **A stuck gauge is NaN**, not a dropped stride: the stride's other channels are fine.
+- **The other leg's gauge torque is carried, not its motor torque**: K5 replays the gauge torque.
+
+**Splits** (`split.py`). The rule is the planned one (whole blocks, the last to test, the ones
+before to val). With three blocks per condition it gives thirds, not 60/20/20. Kept: one block
+each is the only whole-block split of three blocks, and the final models are refitted on train +
+val (two thirds) before the test blocks are scored.
+
+**Scoring** (`evaluate.py`).
+- **Two torques, fitted separately** (`motor`, `gauge`), per J1 Q9's default. One four-output fit
+  was rejected: a tree's splits would trade one torque off against the other, and AB82's NaN
+  gauge rows would have to leave the motor fit too.
+- **`leg` is an input**, and the phase mean is keyed on it. Each gauge channel has its own
+  offset of a few Nm, so a model that cannot tell left from right carries that as error.
+- **nRMSE = RMSE / the range of the measured torque** over all that participant's strides in
+  that mode, both controllers, so SM and TR share a scale.
+- **The test blocks are not scored yet.** Everything so far is on val. One `--test` pass scores
+  every model, the baselines included, after K3's choices are made on val.
+- The self-check writes to `predict/selfcheck/`: a population model depends on who is on disk,
+  so a two-participant run must not overwrite the real rows.
+
+### 2026-11-10: J1b closed: use the published mass and height; scale the twin next
+
+J1b's default was "generic anthropometry, since ExoGait has none". The dataset's own paper
+(Lhoste et al. 2026, J NeuroEng Rehabil 23:114, Table 2) has height and mass for all 19
+(`observations.md`, "J1b"). So:
+
+- `models/exogait/participants.csv` holds them, and `params.csv` reports them.
+- **Proposed, not done:** scale `2D_gait.osim` per participant before K9: segment lengths by
+  height / the generic model's height, masses to the participant's body mass, muscle fibre and
+  tendon lengths with their segments, and maximum isometric force with mass. Then re-solve K5–K7
+  (38 tracking solves, the 16 SM comparisons and their second starts: about a night).
+  - Why: effort is a sum of squared activations, and activation is force over strength. A 90 kg
+    participant on a 62 kg body with the same joint angles is not that participant.
+  - Why not yet: K5–K7's results are consistent as they stand (one generic body, stated), and
+    the AI half is the critical path. The comparison "generic vs scaled" is itself a result.
+- **J1 Q3 (units), Q11 (online) and Q12 (AB/HL) are answered by the paper**, not by the mentor.
+  Q8 changes: the EMG exists for HL01–HL05 and was not released, so the authors are the ones to
+  ask (clhost@ethz.ch, lvianello@sralab.org).
+- `stance_alpha` and `gait_state` stay in the offline models and in H2's no-phase arm: being
+  online does not stop them encoding phase.
+
+### 2026-11-10: K3: acceleration is an input; forests as built; the LSTM without dropout
+
+- **`accel` is an input for every model**, with a `no_accel` arm in the ablation loop. It is the
+  time derivative of the recorded velocities, so nothing new is measured. Reason: K6's rotor
+  term, and what it does to ridge on val (`observations.md`, "K3"). It is exploratory in J7's
+  tables: not one of H1–H3.
+  - Taken on the 101-point grid (a central difference, 13–110 ms apart), in `features()`, so the
+    processed files do not change. A Savitzky–Golay derivative of the raw 333 Hz velocity is the
+    upgrade if the residual matters.
+- **Forests:** `RandomForestRegressor` for both. `bag` is `max_features=1.0`, which is bagged
+  trees, instead of `BaggingRegressor(DecisionTreeRegressor())`: the same trees, built in
+  parallel. One setting (100 trees, leaves of 5, 60,000 rows per tree), not tuned: the two
+  models already span the one parameter that matters, and they agree to 0.3 Nm.
+- **The LSTM has no dropout.** With dropout between its layers, cuDNN crashes Python at exit on
+  this machine (torch 2.14.1+cu126, Windows): exit code 0xC0000409 after a clean run. Early
+  stopping on the val blocks is the regulariser.
+- **Schemes run population first**, so the personalised LSTM can start from its fold's
+  population model. `evaluate.py` writes its rows after every participant: two sessions ended
+  under long runs today.
+- **J7's primary endpoints** are fixed in `stats.py` before the test blocks are scored: the
+  gauge torque; H1 on the LSTM in walking; H2 on the random forest in walking (the LSTM has no
+  no-phase arm); H3 on the LSTM over all five modes, not walking alone as planned, because what a
+  mode input can add is telling the modes apart.
+
+### 2026-11-11: EMG requested from the dataset's authors
+
+Kurian emailed Clément Lhoste and Lorenzo Vianello (one email, both in "To") on 2026-11-11, asking
+for the EMG files of HL01–HL05, their sampling rate and clock alignment, the muscle list, and
+whether they are raw or processed. The email also reported AB82's stuck left-knee gauge and the
+clock restarts in five files.
+
+- **If no reply in a week:** a nudge on the same thread, then the senior author (José Pons).
+- **If no EMG by 2026-12-01** (the cutoff already in the plan), proposed to the mentor, not yet
+  agreed: test H5 on the twin's own muscle activations in place of recorded EMG, stated as such,
+  and check the twin's muscle timing against the EMG in Camargo et al. 2021 (unassisted walking,
+  other people). H5 on real EMG is then reported as not testable. The Camargo data has not been
+  downloaded or matched to our muscles yet.
+
+### 2026-11-11: K6: one length factor from stature; scaled results beside the generic ones
+
+- **Decided:** scale the 2D model with one factor, height / 1.80 m, for every segment; set body
+  mass to the published one; scale muscle maximum force by the mass ratio; leave the X2 at
+  20.7 kg. Scaled solves live in `moco_scaled/` and are reported next to the generic ones, not in
+  their place.
+- **Why:** height and mass are all that is published. Segment-wise factors need leg lengths
+  nobody measured. 1.80 m for the generic model is read off its standing hip height (0.935 m),
+  not documented by its authors.
+- **Why keep both:** the generic results are what reports 1 and 2 quote, and the comparison is
+  itself the finding (H4 is the same on both).
+- **Not done:** the exo-off transparent solves on scaled bodies; AB75's
+  `optimised` solve on a wider stride-length bound.

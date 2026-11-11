@@ -14,7 +14,10 @@ The same tracking problem (track.py) is solved with different exo torques:
     ideal      chosen by Moco at almost no price, within the X2 limits. The measured torque is one of its
                feasible choices, so it wins by construction: an upper bound, never the H4 test. Only
                solved when asked for (the 4th argument)
-    ai         K3's predicted torque, replayed: not here yet (needs K3's predictions)
+    ai         K3's predicted torque, replayed like `measured`:
+                   micromamba run -n opensim python -u src/exogait/assist.py ai [ID] [condition] [model]
+               It needs evaluate.py's test predictions (predict/<model>_<ID>_pred.csv) and the `measured` and
+               `none` solves. A row goes to results/exogait/moco/ai.csv
 
 Effort = the sum of squared muscle activations, integrated over the stride and recomputed from each
 solution the same way. Never the Moco objective, which includes the tracking terms.
@@ -34,6 +37,7 @@ import numpy as np
 import opensim as osim
 import pandas as pd
 
+import preprocess
 import track
 import x2model
 
@@ -66,7 +70,7 @@ def budgeted(subj, cond, n_mesh):
     raise AssertionError(f"optimised: prices did not settle on the budget in 12 steps: {now}")
 
 
-def second_start(subj, cond, case, start_case, n_mesh=50):
+def second_start(subj, cond, case, start_case, n_mesh=50, **solve):
     """Re-solve `case` from the solution of `start_case`, and keep whichever of the two has the lower
     objective. IPOPT lands in different local solutions from different starts (notes "K7": one repeat
     doubled the effort), so one solve per case is not enough. The second solve runs in moco/second/; if it
@@ -81,7 +85,7 @@ def second_start(subj, cond, case, start_case, n_mesh=50):
     name = f"{subj}_{cond}_mean_{case}_m{n_mesh}"
     track.MOCO = main / "second"
     try:
-        row = track.solve(subj, cond, n_mesh, main / f"{subj}_{cond}_mean_{start_case}_m{n_mesh}.sto", case)
+        row = track.solve(subj, cond, n_mesh, main / f"{subj}_{cond}_mean_{start_case}_m{n_mesh}.sto", case, **solve)
     finally:
         track.MOCO = main
     kept = row["check"] == "ok" and row["objective"] < 0.999 * first
@@ -90,6 +94,68 @@ def second_start(subj, cond, case, start_case, n_mesh=50):
         with open(main / "summary.csv", "a", newline="") as f:
             csv.DictWriter(f, fieldnames=list(row)).writerow(row)
     return first, row["objective"], kept
+
+
+def ai_torque(subj, cond, model="lstm"):
+    """K3's predicted joint-output torque in the form K5 replays: the four actuators on the right-heel-strike stride,
+    averaged over the participant's test strides of this condition (personalised model, full inputs). A right test
+    stride gives the right hip and knee. The left ones are the predictions for the left test strides, read at the
+    same instants (np.interp on the clock, inside a block); a right stride the left predictions do not cover without
+    a break is left out. Returns {actuator: Nm on x2model.P} for the prediction and for the measured torque of the
+    same strides, and the number of strides."""
+    mode, controller = preprocess.labels(cond)
+    p = pd.read_csv(x2model.OUT / "predict" / f"{model}_{subj}_pred.csv").drop(columns="t")
+    p = p[(p.scheme == "personalised") & (p["mode"] == mode) & (p.controller == controller)]
+    cols = ["stride", "block", "phase", "t", "hip_tau_gauge", "knee_tau_gauge", "hip_tau_gauge_other", "knee_tau_gauge_other"]
+    p = p.merge(preprocess.read_strides([subj], usecols=cols), on=["stride", "phase"], validate="1:1")
+    ai, measured = ({a: [] for a in track.EXO} for _ in range(2))
+    for _, block in p.groupby("block"):
+        left = block[block.leg == "L"].sort_values("t").drop_duplicates("t")
+        for _, r in block[block.leg == "R"].groupby("stride"):
+            cover = left.t[(left.t >= r.t.iloc[0] - 0.15) & (left.t <= r.t.iloc[-1] + 0.15)]
+            if len(cover) < 2 or cover.iloc[0] > r.t.iloc[0] or cover.iloc[-1] < r.t.iloc[-1] or np.diff(cover).max() > 0.15:
+                continue
+            for j in ("hip", "knee"):
+                ai[f"exo_{j}_r"].append(r[f"{j}_tau_gauge_pred"].to_numpy())
+                ai[f"exo_{j}_l"].append(np.interp(r.t, left.t, left[f"{j}_tau_gauge_pred"]))
+                measured[f"exo_{j}_r"].append(r[f"{j}_tau_gauge"].to_numpy())
+                measured[f"exo_{j}_l"].append(r[f"{j}_tau_gauge_other"].to_numpy())
+    n = len(ai["exo_hip_r"])
+    assert n >= 3, f"{subj} {cond}: {n} right test strides with predictions for both legs"
+    mean = lambda v: (lambda m: m - (x2model.P - 0.5) * (m[-1] - m[0]))(np.mean(v, axis=0))   # periodic, as x2model makes its means
+    return {a: mean(v) for a, v in ai.items()}, {a: mean(v) for a, v in measured.items()}, n
+
+
+def replay_ai(subj="HL03", cond="SM_WALKING", model="lstm", n_mesh=50):
+    """K7's `ai` case: K3's predicted torque replayed on the mean stride, from the two starts `measured` gets, and
+    set against `measured` and `none`. Appends a row to moco/ai.csv and returns it."""
+    tau, same, n = ai_torque(subj, cond, model)
+    k5 = x2model.map_x2(subj, cond)["tau"]   # the measured torque that `measured` replays: the clean strides of every block
+    rms = lambda x: float(np.sqrt(np.mean(np.square(x))))
+    row = track.solve(subj, cond, n_mesh, track.MOCO / f"{subj}_{cond}_mean_measured_m{n_mesh}.sto", "ai", prescribed=tau)
+    assert row["check"] == "ok", f"ai: {row['check']}"
+    first, second, kept = second_start(subj, cond, "ai", "none", n_mesh, prescribed=tau)
+    done = pd.read_csv(track.MOCO / "summary.csv")
+    done = done[(done.participant == subj) & (done.condition == cond) & (done.n_mesh == n_mesh) & (done["check"] == "ok")]
+    last = {c: done[done.case == c].iloc[-1] for c in ("none", "measured", "ai")}
+    e = {c: float(v.effort) for c, v in last.items()}
+    out = dict(participant=subj, condition=cond, model=model, n_mesh=n_mesh, test_strides=n,
+               torque_rmse=round(float(np.mean([rms(tau[a] - same[a]) for a in track.EXO])), 2),          # the model's error on the mean torque
+               torque_rmse_vs_k5=round(float(np.mean([rms(tau[a] - k5[f"gauge_{c}"]) for a, c in track.EXO.items()])), 2),
+               selection_rmse=round(float(np.mean([rms(same[a] - k5[f"gauge_{c}"]) for a, c in track.EXO.items()])), 2),   # test strides vs all clean strides
+               **{f"effort_{c}": e[c] for c in e}, ai_vs_measured_pct=round(100 * (e["ai"] / e["measured"] - 1), 1),
+               ai_vs_none_pct=round(100 * (e["ai"] / e["none"] - 1), 1),
+               rmse_max_ai=max(float(last["ai"][f"rmse_{j}"]) for j in JOINTS), objective_ai=float(last["ai"].objective),
+               second_start_kept=kept,
+               **{f"budget_used_{a}": round(float(last["ai"][f"exo_int2_{a}"]) / float(last["ai"][f"exo_budget_{a}"]), 3) for a in track.EXO})
+    path = track.MOCO / "ai.csv"
+    new = not path.exists()
+    with open(path, "a", newline="") as f:
+        wr = csv.DictWriter(f, fieldnames=list(out))
+        if new:
+            wr.writeheader()
+        wr.writerow(out)
+    return out
 
 
 def cases(subj, cond, n_mesh=50, ideal=False):
@@ -173,6 +239,18 @@ def compare(subj="HL03", cond="SM_WALKING", n_mesh=50, ideal=False):
 
 
 if __name__ == "__main__":
+    import os
+    if os.environ.get("EXOGAIT_SCALED"):   # the twin scaled to this participant, into moco_scaled/ (track.scaled)
+        who = [a for a in sys.argv[1:] if len(a) == 4 and a[:2] in ("AB", "HL")]
+        print("scaled twin: length factor %.3f, body mass %.0f kg" % track.scaled(who[0] if who else "HL03"), flush=True)
+    if sys.argv[1:2] == ["ai"]:   # assist.py ai [ID] [condition] [model]
+        out = replay_ai(*sys.argv[2:5])
+        print("\n".join(f"  {k:<28} {v}" for k, v in out.items()))
+        assert out["rmse_max_ai"] < 3, "ai: hip or knee tracked worse than 3 deg"
+        print(f"OK: {out['participant']} {out['condition']}: the {out['model']}'s torque is {out['torque_rmse']} Nm RMS off the measured "
+              f"torque on the same {out['test_strides']} test strides; replayed, effort {out['effort_ai']} against {out['effort_measured']} "
+              f"measured ({out['ai_vs_measured_pct']:+.1f}%) and {out['effort_none']} with the exo off")
+        sys.exit()
     if sys.argv[1:2] == ["second"]:   # assist.py second ID condition: second starts for `measured` and `none`
         subj, cond = sys.argv[2], sys.argv[3]
         have = lambda c: (track.MOCO / f"{subj}_{cond}_mean_{c}_m50.sto").exists()

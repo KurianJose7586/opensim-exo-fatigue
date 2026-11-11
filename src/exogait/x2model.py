@@ -51,6 +51,8 @@ import numpy as np
 import pandas as pd
 from scipy.integrate import cumulative_trapezoid
 
+from preprocess import heel_strikes   # the one stride rule (J3)
+
 ROOT = Path(__file__).resolve().parents[2]
 BASE = ROOT / "models" / "base" / "2D_gait.osim"
 REF = ROOT / "models" / "base" / "referenceCoordinates.sto"
@@ -88,9 +90,9 @@ def _add(parent, tag, name, **props):
         ET.SubElement(e, k).text = " ".join(map(str, v)) if isinstance(v, tuple) else str(v)
 
 
-def build_model(path=OUT / "model" / "2D_gait_x2.osim"):
-    """2D_gait.osim + X2 mass + hip/knee exo actuators, written as .osim."""
-    tree = ET.parse(BASE)
+def build_model(path=OUT / "model" / "2D_gait_x2.osim", base=BASE):
+    """2D_gait.osim (or a scaled copy of it, `base`) + X2 mass + hip/knee exo actuators, written as .osim."""
+    tree = ET.parse(base)
     m = tree.getroot().find("Model")
     for name, parent, kg, com, izz in X2_PARTS:
         # welded at the parent's origin, so the COM is in the parent frame.
@@ -131,16 +133,17 @@ def strides(d, cond):
     Returns stride times (n,) [s], {coordinate or "bp": (n, 101) deg, "gauge_<coord>" and
     "motor_<coord>": (n, 101) Nm, all resampled on time}, a mask of the
     strides whose BackPackAngle the gyro confirms, and how many strides each filter rejects (they
-    overlap). Filters: K4 stride-extraction and hip-pelvis-frame work. The gyro filter only touches
-    what is built from BackPackAngle: a backpack artefact says nothing about the joint encoders.
+    overlap). Filters: K4 stride-extraction and hip-pelvis-frame work. They are stricter than
+    preprocess.py's, which keeps every complete stride for the torque models: a mean stride for Moco
+    wants steady walking only. The gyro filter only touches what is built from BackPackAngle: a
+    backpack artefact says nothing about the joint encoders.
     """
     t, lab = d.time.to_numpy(), (d.condition == cond).to_numpy()
     q = {k: np.degrees(d[c].to_numpy()) for k, c in JOINTS.items()} | {"bp": np.degrees(d.BackPackAngle.to_numpy())}
     q |= {f"{p}_{k}": d[c.replace("JointPositions", col)].to_numpy() for k, c in JOINTS.items() for p, col in TORQUES.items()}
     gyro = np.degrees(d.BackPackAngularVelocity.to_numpy())
     state, done = d.gait_state_right.to_numpy(), d.step_complete_r.to_numpy() == True
-    hs = np.flatnonzero(np.diff(d.gait_cycle_right.to_numpy()) < -50) + 1   # integer phase wraps 99 -> 0
-    hs_l = np.flatnonzero(np.diff(d.gait_cycle_left.to_numpy()) < -50) + 1
+    hs, hs_l = heel_strikes(d.gait_cycle_right.to_numpy()), heel_strikes(d.gait_cycle_left.to_numpy())
     sp = [slice(a, b + 1) for a, b in zip(hs[:-1], hs[1:])]                  # closing heel strike included
     bout = [lab[s].all() and np.diff(t[s]).max() <= 0.1 for s in sp]         # inside one labelled, gap-free bout
 
