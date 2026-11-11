@@ -504,6 +504,8 @@ def load_split(subj, cond, n_mesh=50, case="measured"):
     d = preprocess.read_strides([subj], usecols=["leg", "mode", "controller", "stance_alpha"])
     a = d[(d.leg == "R") & (d["mode"] == "walk") & (d.controller == preprocess.CONTROLLERS[cond.split("_")[0]])]
     a = a.stance_alpha.to_numpy().reshape(-1, 101)
+    if os.environ.get("EXOGAIT_SCALED"):
+        scaled(subj)   # this participant's model
     proc = osim.ModelProcessor(str(MODEL))
     proc.append(osim.ModOpAddReserves(1.0, 1000.0, False))
     model = proc.process()
@@ -547,7 +549,7 @@ def load_splits(n_mesh=50):
     fig.legend(*axs[0].get_legend_handles_labels(), loc="lower center", ncol=2, frameon=False, fontsize=9)
     fig.suptitle("A held-out check of the twin: the load split between the feet. The tracking never sees the footplate signal", fontsize=11, x=0.01, ha="left")
     fig.tight_layout(rect=(0, 0.07, 1, 0.94), w_pad=1.5)
-    png = x2model.ROOT / "figures" / "k6_load_split.png"
+    png = x2model.ROOT / "figures" / f"k6_load_split{'_scaled' if SCALE != 1 else ''}.png"
     fig.savefig(png, dpi=130)
     plt.close(fig)
     return rows, png
@@ -585,6 +587,8 @@ if __name__ == "__main__":
         print(f"OK: {out}: {len(rows)} participants, c {min(r['hip_offset_c_deg'] for r in rows)}..{max(r['hip_offset_c_deg'] for r in rows)} deg")
         sys.exit()
     if sys.argv[1:2] == ["load"]:   # track.py load: every `measured` walking solve on disk
+        if os.environ.get("EXOGAIT_SCALED"):
+            scaled("HL03")   # points MOCO at moco_scaled/; load_split() then takes each participant's own model
         rows, png = load_splits()
         r = np.array([q["r"] for q in rows])
         assert len(rows) >= 30 and np.median(r) > 0.7, f"the model's load split does not follow the footplates: median r {np.median(r):.2f}"

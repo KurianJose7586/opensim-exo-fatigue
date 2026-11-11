@@ -553,3 +553,17 @@ clock restarts in five files.
   and check the twin's muscle timing against the EMG in Camargo et al. 2021 (unassisted walking,
   other people). H5 on real EMG is then reported as not testable. The Camargo data has not been
   downloaded or matched to our muscles yet.
+
+### 2026-11-11: K6: one length factor from stature; scaled results beside the generic ones
+
+- **Decided:** scale the 2D model with one factor, height / 1.80 m, for every segment; set body
+  mass to the published one; scale muscle maximum force by the mass ratio; leave the X2 at
+  20.7 kg. Scaled solves live in `moco_scaled/` and are reported next to the generic ones, not in
+  their place.
+- **Why:** height and mass are all that is published. Segment-wise factors need leg lengths
+  nobody measured. 1.80 m for the generic model is read off its standing hip height (0.935 m),
+  not documented by its authors.
+- **Why keep both:** the generic results are what reports 1 and 2 quote, and the comparison is
+  itself the finding (H4 is the same on both).
+- **Not done:** the `ai` case and the exo-off transparent solves on scaled bodies; AB75's
+  `optimised` solve on a wider stride-length bound.

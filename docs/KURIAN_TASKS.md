@@ -99,7 +99,7 @@ with `src/fatigue` on `sys.path`).
 | K3 | Nonlinear torque models (RO2, H1–H3) | K2, J4, J5 | L | **done** 2026-11-11: forests and LSTM, val then one test pass (`notes/observations.md`, "K3 and J7"). GPR and GRU (optional) not run |
 | K4 | OpenSim model and X2 mapping (RO3) | K1, J2 | L | **in progress**: model, mapping and torque sign done; Jasith's plot check left |
 | K5 | MocoTrack: reproduce the gait | K4 | L | **walking done** on mean strides, all 19 × SM/TR. Single strides (need J3) and ramps left |
-| K6 | Personalised twin state (Layer 4) | K5; J1b (soft: generic anthropometry is the default) | M | **done** on mean walking strides, on a generic body. Mass and height are published (J1b): scaling the model is next |
+| K6 | Personalised twin state (Layer 4) | K5; J1b (soft: generic anthropometry is the default) | M | **done** on mean walking strides, on a generic body and on one scaled to each participant's height and mass (`EXOGAIT_SCALED=1`); H4 is the same on both |
 | K7 | AI + Moco integration (RO4, H4) | K3, K5, K6, J1 Q5 | L | **done on mean SM strides**: `none`, `measured`, `optimised` (16 participants), `ai` (15). Single strides left |
 | K8 | Assist-as-needed controller with EMG (Layer 6, H5) | K7, J6 | L | **blocked**: no EMG (J1 Q8). Closes as not possible if none by 2026-12-01 |
 | K9 | RO6 evaluation at scale | K3, K7 (K8 if EMG) | L | todo |

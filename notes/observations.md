@@ -918,6 +918,44 @@ solve. Two starts, as for `measured`. 16 participants; `results/exogait/moco/ai.
 
 ---
 
+### K6: the twin scaled to each participant (2026-11-11)
+
+`EXOGAIT_SCALED=1` (`track.scaled`): segment lengths by height / 1.80 m, body mass set to the
+published one, muscle maximum forces by mass / 62 kg, the X2 unscaled at 20.7 kg. Solves in
+`results/exogait/moco_scaled/`, beside the generic ones. Same pipeline as K5–K7: `measured` SM and
+TR from the seed, then `none`, `measured`, `optimised` on SM, second starts. No `ai` case and no
+exo-off TR solves on the scaled bodies yet.
+
+| | Generic body | Scaled body |
+|---|---|---|
+| `measured` walking solves passing K5's checks | 34 of 38 | 35 of 36 run (AB82 SM is the stuck gauge; HL05 TR was still solving when this was written) |
+| Tracking error, median: hip L/R, knee L/R (deg) | 0.64 / 0.59, 0.46 / 0.31 | 0.56 / 0.57, 0.39 / 0.29 |
+| Load split against the footplates: r, RMSE (median) | 0.90, 0.19 (34 solves) | 0.91, 0.18 (35 solves) |
+| H4 primary, optimised vs measured effort | 0.268 vs 0.438, 16 of 16, p = 3.1e-5 | 0.272 vs 0.424, 16 of 16, p = 3.1e-5 |
+| Optimised vs measured, median of participants | −33.6% | −33.9% (range −23.6 to −49.9%) |
+| Measured vs exo off | 0.438 vs 0.474, 14 of 16, p = 0.011 | 0.424 vs 0.471, 14 of 16, p = 0.0021 |
+
+- **H4 does not depend on the generic body.** Same direction in every participant, the same
+  median saving, on bodies of 51 to 90 kg.
+- **Which participants are in the 16 changes by one each way.** HL01 SM passes the tracking check
+  when scaled (it missed at 3.13° on the generic body). AB75's `optimised` solve ends with the
+  stride length on its bound when scaled, so AB75 drops out. HL05 SM misses the check on both
+  (3.8° scaled, 4.2° generic).
+- **Scaling moves each person's effort the way their weight says it should.** Measured-torque
+  effort, scaled against generic, 15 participants: from −31% (AB73) and −20% (AB68, 90 kg) to
+  +17% (AB71, 55 kg) and +29% (AB70, 51 kg). Spearman ρ with body mass −0.63 (p = 0.011). The X2
+  weighs 20.7 kg whoever wears it, so it is 41% of AB70's weight and 23% of AB68's. The group
+  median barely moves (0.414 against 0.407, p = 0.2).
+- **AB73 is not explained by mass** (70 kg, 1.78 m, −31%). The two solves differ by more than the
+  body; they may sit in different local solutions. Not chased.
+- **The foot hand-over bounce is still there** on scaled bodies (at heel strike the measured share
+  is 0.35, the model's 0.19): it is the contact model, not the body size.
+- Mass and height are correlated in this group, so the effect of one cannot be told from the other.
+- Figures: `figures/exogait/h4_scaled.png`, `figures/k6_load_split_scaled.png`. Tables:
+  `results/exogait/stats/h4_scaled.csv`, `moco_scaled/load_split.csv`.
+- The run stopped between about 05:40 and 11:30 (the laptop slept despite the keep-awake wrapper)
+  and picked up by itself.
+
 ## Open questions
 
 - [ ] Resolve the threshold disagreement: 0.05 in code versus 0.02% in the paper. Which did they use?

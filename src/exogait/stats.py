@@ -26,6 +26,7 @@ H4's secondaries: optimised vs exo off, measured vs exo off, and TR measured vs 
 test: in TR the torque carries the device, notes "K6").
 """
 
+import os
 import sys
 
 import matplotlib
@@ -37,7 +38,8 @@ from scipy.stats import rankdata, wilcoxon
 
 from preprocess import MODES, ROOT
 
-PREDICT, MOCO = ROOT / "results" / "exogait" / "predict", ROOT / "results" / "exogait" / "moco"
+SCALED = "_scaled" if os.environ.get("EXOGAIT_SCALED") else ""   # H4 on the twin scaled to each participant (track.scaled)
+PREDICT, MOCO = ROOT / "results" / "exogait" / "predict", ROOT / "results" / "exogait" / f"moco{SCALED}"
 OUT, FIG = ROOT / "results" / "exogait" / "stats", ROOT / "figures" / "exogait"
 ORDER = ["phase_mean", "ridge", "rf", "bag", "lstm"]
 LABEL = dict(zip(ORDER, ("Phase mean", "Ridge", "Random forest", "Bagged trees", "LSTM")))
@@ -106,10 +108,11 @@ def effort_tests():
     a = a[(a.condition == "SM_WALKING") & (a.n_mesh == 50)].set_index("participant")
     s = pd.read_csv(MOCO / "summary.csv")
     s = s[(s.n_mesh == 50) & (s["check"] == "ok") & (s.condition == "transparent_WALKING")].drop_duplicates(["participant", "case"], keep="last")
-    tr = s.pivot(index="participant", columns="case", values="effort").dropna(subset=["measured", "none"])
+    tr = s.pivot(index="participant", columns="case", values="effort").reindex(columns=["measured", "none"]).dropna()
     rows = [dict(hypothesis="h4", kind=kind, controller=c, a=x, b=y) | paired(d[f"effort_{x}"] if c == "SM" else d[x], d[f"effort_{y}"] if c == "SM" else d[y])
             for kind, c, d, x, y in (("primary", "SM", a, "optimised", "measured"), ("secondary", "SM", a, "optimised", "none"),
-                                     ("secondary", "SM", a, "measured", "none"), ("secondary", "TR", tr, "measured", "none"))]
+                                     ("secondary", "SM", a, "measured", "none"), ("secondary", "TR", tr, "measured", "none"))
+            if len(d)]   # the scaled run has no exo-off TR solves
     if (MOCO / "ai.csv").exists():   # K7's `ai` case: the LSTM's torque replayed. Expected: no different from `measured`
         ai = pd.read_csv(MOCO / "ai.csv").drop_duplicates(["participant", "condition", "model"], keep="last").set_index("participant")
         rows.append(dict(hypothesis="h4", kind="secondary", controller="SM", a="ai", b="measured") | paired(ai.effort_ai, ai.effort_measured))
@@ -181,11 +184,11 @@ if __name__ == "__main__":
               f"{int(((sec.p_holm < 0.05) & (sec.gain_median < 0)).sum())} of them against the hypothesis")
 
     t, a = effort_tests()
-    t.to_csv(OUT / "h4.csv", index=False)
-    figure(FIG / "h4.png", [("optimised vs measured", a.effort_optimised, a.effort_measured), ("optimised vs exo off", a.effort_optimised, a.effort_none),
+    t.to_csv(OUT / f"h4{SCALED}.csv", index=False)
+    figure(FIG / f"h4{SCALED}.png", [("optimised vs measured", a.effort_optimised, a.effort_measured), ("optimised vs exo off", a.effort_optimised, a.effort_none),
                             ("measured vs exo off", a.effort_measured, a.effort_none)], ("", ""),
            "muscle effort over the stride (sum of squared activations x s)",
-           f"H4: simulated muscle effort over the mean SM walking stride, {len(a)} participants (left value: the first named case)")
+           f"H4{', scaled bodies' if SCALED else ''}: simulated muscle effort over the mean SM walking stride, {len(a)} participants (left value: the first named case)")
     for row in t.itertuples():
         print(f"h4 {row.kind}: {row.controller} {row.a} vs {row.b}: {row.a_median:.3f} vs {row.b_median:.3f}, lower in {row.a_lower}/{row.n}, "
               f"p = {row.p:.2g}, r = {row.r_rb:+.2f}" + ("" if row.kind == "primary" else f", Holm p = {row.p_holm:.2g}"))
