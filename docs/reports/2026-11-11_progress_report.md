@@ -149,7 +149,8 @@ body and the heaviest (90 kg) 20% less (rank correlation with body mass −0.63,
 exoskeleton weighs the same whoever wears it, so it is a larger share of a light person's load.
 
 The 16 participants are not quite the same 16: one enters and one leaves when the body is
-scaled. The AI-torque case has not been run on the scaled bodies yet.
+scaled. The AI torque, replayed on the scaled bodies, again matches the measured torque's effort
+(−1.8%, not significant, 15 participants).
 
 ## Limits
 
@@ -176,5 +177,4 @@ scaled. The AI-torque case has not been run on the scaled bodies yet.
 ## Next
 
 1. Single strides and ramps in the simulation.
-2. The AI-torque case on the scaled bodies.
-3. The write-up of methods and results.
+2. The write-up of methods and results.
