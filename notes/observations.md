@@ -923,7 +923,7 @@ solve. Two starts, as for `measured`. 16 participants; `results/exogait/moco/ai.
 `EXOGAIT_SCALED=1` (`track.scaled`): segment lengths by height / 1.80 m, body mass set to the
 published one, muscle maximum forces by mass / 62 kg, the X2 unscaled at 20.7 kg. Solves in
 `results/exogait/moco_scaled/`, beside the generic ones. Same pipeline as K5–K7: `measured` SM and
-TR from the seed, then `none`, `measured`, `optimised` on SM, second starts. No `ai` case and no
+TR from the seed, then `none`, `measured`, `optimised` on SM, second starts, then `ai`. No
 exo-off TR solves on the scaled bodies yet.
 
 | | Generic body | Scaled body |
@@ -955,6 +955,11 @@ exo-off TR solves on the scaled bodies yet.
   `results/exogait/stats/h4_scaled.csv`, `moco_scaled/load_split.csv`.
 - The run stopped between about 05:40 and 11:30 (the laptop slept despite the keep-awake wrapper)
   and picked up by itself.
+- **The `ai` case on the scaled bodies (later the same day,** `EXOGAIT_SCALED=1 assist.py ai`,
+  `moco_scaled/ai.csv`**):** effort with the LSTM's torque against the measured torque: median
+  −1.8% (range −3.7 to +6.7%), lower in 9 of 15, p = 0.89. Generic body: −1.4%, 9 of 15, p = 0.36.
+  The same conclusion. HL03 fails the replay check again ("exo torque is not the prescribed
+  torque"), as on the generic body, so it is something in HL03's predicted torque, not the body.
 
 ## Open questions
 

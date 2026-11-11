@@ -565,5 +565,5 @@ clock restarts in five files.
   not documented by its authors.
 - **Why keep both:** the generic results are what reports 1 and 2 quote, and the comparison is
   itself the finding (H4 is the same on both).
-- **Not done:** the `ai` case and the exo-off transparent solves on scaled bodies; AB75's
+- **Not done:** the exo-off transparent solves on scaled bodies; AB75's
   `optimised` solve on a wider stride-length bound.
