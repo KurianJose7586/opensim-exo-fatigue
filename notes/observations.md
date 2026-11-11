@@ -928,7 +928,7 @@ exo-off TR solves on the scaled bodies yet.
 
 | | Generic body | Scaled body |
 |---|---|---|
-| `measured` walking solves passing K5's checks | 34 of 38 | 35 of 36 run (AB82 SM is the stuck gauge; HL05 TR was still solving when this was written) |
+| `measured` walking solves passing K5's checks | 34 of 38 | 35 of 37 (AB82 SM is the stuck gauge and cannot run; HL05 misses the checks in both modes, as on the generic body) |
 | Tracking error, median: hip L/R, knee L/R (deg) | 0.64 / 0.59, 0.46 / 0.31 | 0.56 / 0.57, 0.39 / 0.29 |
 | Load split against the footplates: r, RMSE (median) | 0.90, 0.19 (34 solves) | 0.91, 0.18 (35 solves) |
 | H4 primary, optimised vs measured effort | 0.268 vs 0.438, 16 of 16, p = 3.1e-5 | 0.272 vs 0.424, 16 of 16, p = 3.1e-5 |
