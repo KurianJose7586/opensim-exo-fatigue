@@ -22,8 +22,9 @@ too, and the two are joined.
 - **A new check of the simulation against a measurement it never saw.** The exoskeleton's
   footplates record how the load is split between the feet. The model reproduces that split (r =
   0.90), and the comparison shows where its foot contact is wrong.
-- **Every participant's height and weight are published** in the dataset's paper, which we had
-  missed. The model body is still generic; scaling it is the next step.
+- **The model is now scaled to each participant.** Every participant's height and weight are
+  published in the dataset's paper, which we had missed. On bodies scaled to them, the assistance
+  result is unchanged: the optimised torque still lowers effort by 34% (16 of 16).
 - **EMG (RO5, H5) is still blocked.** The paper says EMG was recorded for five participants; it
   was not released. We wrote to the authors on 11 November.
 
@@ -35,7 +36,7 @@ too, and the two are joined.
 | Layer 2: processing (RO1) | **Done** | Strides, stride features, exclusion log, whole-block train/validation/test splits, a leakage check |
 | Layer 3A: AI torque prediction (RO2, H1–H3) | **Done** | Five models, two schemes, four input sets, two torques; scored once on the test blocks |
 | Layer 3B: OpenSim model (RO3) | Done | X2 model; angle mapping checked on all 19 |
-| Layer 4: personalised twin state | Done for walking | Generic body; height and mass now known for all 19 |
+| Layer 4: personalised twin state | **Done for walking** | A generic body, and one scaled to each participant's height and mass |
 | Layer 5: Moco optimal control | Done for walking | 38 of 38 tracking solves converge; load split checked against the footplates |
 | Layer 6: assistance, H4 (RO4) | **Done on mean strides** | Exo off, measured, AI-predicted and optimised torque compared |
 | EMG-informed modulation (RO5, H5) | Blocked | Authors asked for the EMG of five participants |
@@ -126,10 +127,34 @@ It gets the hand-over between the feet wrong: the real load moves across smoothl
 model's incoming foot takes the load, gives it back and takes it again. That is a known weakness
 of simple foot-contact models, now measured for this one.
 
+### 7. The model scaled to each participant
+
+![H4 on scaled bodies: muscle effort per participant](../../figures/exogait/h4_scaled.png)
+
+Until now one 62 kg body stood in for 19 people of 47 to 90 kg. We scaled the model to each
+participant's published height and weight (the exoskeleton stays at 20.7 kg) and solved the
+walking and the assistance cases again.
+
+| | Generic body | Scaled body |
+|---|---|---|
+| Walking simulations passing our checks | 34 of 38 | 35 of 37 |
+| Effort, optimised against measured torque | 0.268 vs 0.438; 16 of 16 | 0.272 vs 0.424; 16 of 16 |
+| Median saving from the optimised torque | 33.6% | 33.9% |
+| Measured torque against exoskeleton off | lower in 14 of 16; p = 0.011 | lower in 14 of 16; p = 0.002 |
+| Load split against the footplates (r) | 0.90 | 0.91 |
+
+So H4 does not depend on the generic body. Scaling also moves each person's effort the way their
+weight says it should: the lightest participant (51 kg) works 29% harder than on the generic
+body and the heaviest (90 kg) 20% less (rank correlation with body mass −0.63, p = 0.011). The
+exoskeleton weighs the same whoever wears it, so it is a larger share of a light person's load.
+
+The 16 participants are not quite the same 16: one enters and one leaves when the body is
+scaled. The AI-torque case has not been run on the scaled bodies yet.
+
 ## Limits
 
-- **A generic body.** One 62 kg model for 19 people of 47 to 90 kg. Muscle effort is a model
-  quantity, not checked against oxygen use or EMG.
+- **Simple scaling.** One length factor from height, because no segment lengths were measured.
+  Muscle effort is a model quantity, not checked against oxygen use or EMG.
 - **Offline models.** Every torque model works on whole strides, which needs the next heel strike.
   They are not yet usable in a live controller.
 - **Same-session test data.** The held-out passes come from the same session as the training
@@ -150,6 +175,6 @@ of simple foot-contact models, now measured for this one.
 
 ## Next
 
-1. Scale the model to each participant's height and weight, and solve the walking again.
-2. Single strides and ramps in the simulation.
+1. Single strides and ramps in the simulation.
+2. The AI-torque case on the scaled bodies.
 3. The write-up of methods and results.

@@ -27,11 +27,11 @@ A short update on the ExoGait work, with a report and a video of the simulation 
   it (r = 0.90).
 - The earlier result stands: an optimised torque with the measured torque's budget lowers the
   model's muscle effort by 34%, in all 16 participants tested.
+- The model is now scaled to each participant's height and weight, which are in the dataset's
+  paper. On the scaled bodies that result is the same (34%, 16 of 16).
 
 **What is not done**
 
-- The simulation still uses one generic body. Each participant's height and weight are in the
-  dataset's paper, and scaling the model to them is our next step.
 - The simulation covers walking on mean strides. Single strides and ramps come next.
 - EMG (RO5, H5): the paper says EMG was recorded for five participants, but it was not released.
   We have written to the authors.
