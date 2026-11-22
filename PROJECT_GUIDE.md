@@ -52,7 +52,7 @@ The dataset is the ExoGait Benchmark (Lhoste et al. 2026, J NeuroEng Rehabil 23:
 | H2 | Gait phase helps | | **Supported, small for a strong model.** Random forest: 3.68 vs 4.02 Nm, 19 of 19, p = 3.8e-6 |
 | H3 | Locomotion mode helps | | **Supported, very small.** LSTM, all modes: 2.81 vs 2.95 Nm, 18 of 19, p = 7.6e-6 |
 | H4 | Optimised assistance lowers simulated effort | `assist.py` | **First result, 16 participants:** −34% against the measured torque at the same torque budget (16 of 16, p = 3.1e-5) |
-| H5 | EMG changes the allocation | `assist.py` (K8) | Data in hand; test not yet run |
+| H5 | EMG changes the allocation | `assist.py` (K8) | **First result, 3 participants:** a small, weight-dependent change. With the muscles made to follow the EMG closely the chosen torque moves by 23–34% (RMS); weighted like effort, by about 10%, which is near solver noise. Descriptive (n = 3) |
 
 ## 3. How each title term is delivered
 
@@ -129,5 +129,4 @@ Numbers and how they were obtained are in `notes/observations.md` (sections "K2"
 
 ## 8. Next
 
-1. K8: the EMG-informed assistance case and H5, on HL01–HL05.
-2. Single strides and ramps; the at-scale evaluation (K9), on the DGX if it is granted.
+1. Single strides and ramps; the at-scale evaluation (K9), on the DGX if it is granted.

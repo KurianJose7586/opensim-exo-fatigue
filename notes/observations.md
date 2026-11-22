@@ -998,6 +998,43 @@ exo runs, an index that places each file on the exo file's clock, a README, QC f
 - This is the first check of the twin's muscles against measurement. It is what we proposed to do
   with Camargo et al.'s EMG if the authors had said no; now it is on the same people.
 
+### K8 / H5: assistance chosen with the participant's EMG (2026-11-22)
+
+`assist.py emg ID SM_WALKING` on the scaled twin (`EXOGAIT_SCALED=1`): `optimised` again (same
+per-actuator torque budget, price loop), from the `optimised` solution, plus a goal that the
+excitations of ten muscles (RF, VL, BF→hamstrings, TA, MG→gastroc, both legs) follow the
+participant's mean SM-walking EMG. Results in `moco_scaled/emg.csv`, plots `plots/k8_*`.
+
+- **Scale.** The EMG has no absolute scale. Moco's `addScaleFactor` makes IPOPT die with an access
+  violation (Moco 4.6, tried twice), so each envelope is scaled to that muscle's mean excitation in
+  `optimised`: the EMG may change when a muscle works, not how much on average.
+- **Weight.** `EMG_W` (env `EXOGAIT_EMG_W`): 1 (= the effort goal) and 10. No principled value
+  exists, so both are reported.
+
+| Participant, EMG weight | Muscles vs EMG, median r: optimised → emg | Effort vs optimised | Torque vs optimised: RMS difference, median (max) | Shape r, min | Largest shift in budget spent by 60% of the stride |
+|---|---|---|---|---|---|
+| HL02, 1 | 0.43 → 0.53 | −1.9% | 12% (14%) | 0.99 | 0.05 |
+| HL03, 1 | 0.14 → 0.45 | −1.2% | 9% (14%) | 0.99 | 0.01 |
+| HL04, 1 | 0.50 → 0.62 | −4.0% | 10% (22%) | 0.98 | 0.03 |
+| HL02, 10 | 0.43 → 0.83 | +3.4% | 34% (36%) | 0.92 | 0.12 |
+| HL03, 10 | 0.14 → 0.81 | +7.2% | 23% (36%) | 0.94 | 0.04 |
+| HL04, 10 | 0.50 → 0.89 | +5.8% | 23% (33%) | 0.95 | 0.04 |
+
+- **H5, as far as three people allow:** the EMG changes the chosen assistance, by an amount that
+  grows with how closely the muscles must follow it. With the EMG weighted like effort the torque
+  keeps its shape (r ≥ 0.98) and moves by about 10%; with the muscles made to follow the EMG closely
+  (r 0.81–0.89) it moves by 23–34%, mostly in shape, not in when the budget is spent. A small,
+  weight-dependent effect, not a different strategy. Descriptive: n = 3, no test is possible.
+- **Effort with weight 1 came out 1–4% below `optimised`**, although the EMG goal only adds cost. So
+  the `optimised` solutions are not exact optima (IPOPT local solutions; the price loop also lands
+  anywhere in 90–102% of the budget). Differences of that size are solver noise, which makes the
+  weight-1 torque changes (~10%) hard to separate from it. The weight-10 changes are well above it.
+- **With weight 10, effort rises 3–7%**: following the EMG costs the model co-contraction it would
+  otherwise avoid (the EMG never falls below 20–30% of its peak).
+- **Missing:** HL01 (weight 1: the price loop did not settle in 12 steps; its right-knee actuator
+  would spend only 41% of its budget at the floor price), HL05 (fails K5's tracking checks). Not
+  retried.
+
 ## Open questions
 
 - [ ] Resolve the threshold disagreement: 0.05 in code versus 0.02% in the paper. Which did they use?

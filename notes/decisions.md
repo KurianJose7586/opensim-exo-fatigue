@@ -577,3 +577,14 @@ clock restarts in five files.
   the authors have checked the alignment (±0.1 s) and the channel map.
 - **Constraint:** not public data. It stays out of git and out of anything shared; cite the article
   and Dryad. Ask the authors before publishing derived EMG tables.
+
+### 2026-11-22: K8: EMG as a tracking goal, scaled to the no-EMG solution, at two weights
+
+- **Decided:** K8 is Moco's EMG-tracking pattern (a `MocoControlTrackingGoal` on ten muscle
+  excitations) on top of `optimised`, not per-muscle effort weights. Each envelope is scaled to that
+  muscle's mean excitation in `optimised`. Reported at EMG weights 1 and 10.
+- **Why:** tracking uses the EMG's timing directly; effort weights would need a mapping from EMG to
+  weight that we would have to invent. Moco's own scale factors crash the solver (access violation),
+  so the scale is set outside. The weight has no principled value, so the result is reported as a
+  function of it.
+- **Limit:** three participants (HL02–HL04), mean SM walking strides only.
