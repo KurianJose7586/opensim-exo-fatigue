@@ -51,6 +51,7 @@ TRACK_W = 10.0      # hip and knee tracking against effort at 1: at 1 the knee r
 PELVIS_W = 0.2      # pelvis_tilt next to hip and knee: a backpack signal
 ANKLE_W = 0.001     # stock reference ankle next to hip and knee (0.01 against effort): free, it flutters in swing
 STRIDE = (0.5, 1.3) # pelvis advance over the stride, as fractions of stride_length(): forward; the length is the model's
+EMG_W = float(os.environ.get("EXOGAIT_EMG_W", 1.0))        # K8: the EMG-tracking goal against effort at 1 (decisions.md 2026-11-22)
 EXO_WEIGHT = 1e-3   # = twin.EXO_WEIGHT: the exo's weight in the effort goal when Moco chooses its torque (`ideal`)
 TOL = 1e-3          # IPOPT convergence; MocoTrack's own default is 1e-2
 DEG = np.pi / 180
@@ -143,7 +144,7 @@ def ground_forces(model, sol):
     return np.array(grf.getIndependentColumn()), {s: grf.getDependentColumn(f"ground_force_{s}_vy").to_numpy() for s in "rl"}
 
 
-def solve(subj="HL03", cond="SM_WALKING", n_mesh=50, guess=SEED, case="measured", exo_w=None, max_iter=3000, prescribed=None):
+def solve(subj="HL03", cond="SM_WALKING", n_mesh=50, guess=SEED, case="measured", exo_w=None, max_iter=3000, prescribed=None, emg=None):
     """One solve. Returns the summary row (dict); the solution is written to MOCO.
     guess: a solved .sto of the same model (any stride) to start from, stretched onto this stride.
            None starts from the tracked states: how the seed was first made, but it usually wanders.
@@ -157,19 +158,22 @@ def solve(subj="HL03", cond="SM_WALKING", n_mesh=50, guess=SEED, case="measured"
                           Moco 4.6 cannot constrain the integral itself (MocoControlGoal has no constraint mode,
                           and MocoOutputGoal on |actuation hits a stale-cache error).
                ai         the exo replays `prescribed`, {actuator: Nm on x2model.P}: K3's predicted torque
-                          (assist.ai_torque). Replayed exactly, like `measured`, and not held to the budget."""
+                          (assist.ai_torque). Replayed exactly, like `measured`, and not held to the budget.
+               emg        as `optimised`, plus a goal (weight EMG_W) that the excitations of the muscles in `emg`,
+                          {control: excitation on x2model.P}: the EMG envelope, scaled by assist.emg_case. Not
+                          Moco's addScaleFactor: with it the solve dies in IPOPT (access violation, Moco 4.6). K8, H5"""
     name = f"{subj}_{cond}_mean_{case}_m{n_mesh}"
     cwd, work = os.getcwd(), MOCO / "work" / name
     work.mkdir(parents=True, exist_ok=True)
     guess = guess and str(Path(guess).resolve())
     os.chdir(work)   # MocoTrack and the solver write <name>_tracked_states.sto and a stop file into the cwd
     try:
-        return _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name, prescribed)
+        return _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name, prescribed, emg)
     finally:
         os.chdir(cwd)
 
 
-def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name, prescribed=None):
+def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name, prescribed=None, emg=None):
     MODEL.exists() or x2model.build_model(MODEL)
     r = x2model.map_x2(subj, cond)
     mean, P = r["mean"], x2model.P
@@ -214,7 +218,8 @@ def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name, prescribed=No
     effort = osim.MocoControlGoal.safeDownCast(problem.updGoal("control_effort"))
     effort.setWeight(1.0)
     for a in EXO:   # prescribed torques cost nothing; chosen ones cost EXO_WEIGHT (`ideal`) or their price (`optimised`)
-        effort.setWeightForControl(f"/forceset/{a}", {"ideal": EXO_WEIGHT, "optimised": (exo_w or {}).get(a, EXO_WEIGHT)}.get(case, 0.0))
+        effort.setWeightForControl(f"/forceset/{a}", {"ideal": EXO_WEIGHT, "optimised": (exo_w or {}).get(a, EXO_WEIGHT),
+                                                      "emg": (exo_w or {}).get(a, EXO_WEIGHT)}.get(case, 0.0))
 
     # the measured joint-output torque: replayed exactly (`measured`), or only its budget kept (`optimised`)
     measured = {a: lowpass(r["tau"][f"gauge_{c}"], T) for a, c in EXO.items()}
@@ -222,7 +227,7 @@ def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name, prescribed=No
     stuck = [a for a, v in measured.items() if np.ptp(v) < 1.0]   # AB82's left-knee gauge reads -12.07 Nm throughout SM
     assert not stuck or case == "none", f"{subj} {cond}: the gauge torque at {stuck} is constant: a stuck channel, nothing to replay"
     budget = {a: float(np.trapezoid(v ** 2, P * T)) for a, v in measured.items()}   # Nm^2 s
-    tau = {"measured": measured, "none": {a: 0 * v for a, v in measured.items()}, "ideal": {}, "optimised": {},
+    tau = {"measured": measured, "none": {a: 0 * v for a, v in measured.items()}, "ideal": {}, "optimised": {}, "emg": {},
            "ai": {a: lowpass(v, T) for a, v in (prescribed or {}).items()}}[case]
     assert case != "ai" or (set(tau) == set(EXO) and max(np.abs(v).max() for v in tau.values()) < x2model.X2_TORQUE), \
         "`ai` needs a torque for each of the four actuators, within the X2 limit"
@@ -244,9 +249,18 @@ def _solve(subj, cond, n_mesh, guess, case, exo_w, max_iter, name, prescribed=No
         if not s.endswith("pelvis_tx/value"):
             periodic.addStatePair(osim.MocoPeriodicityGoalPair(s))
     periodic.addControlPair(osim.MocoPeriodicityGoalPair("/lumbarAct"))
-    for a in EXO if case in ("ideal", "optimised") else ():   # prescribed torques are periodic already
+    for a in EXO if case in ("ideal", "optimised", "emg") else ():   # prescribed torques are periodic already
         periodic.addControlPair(osim.MocoPeriodicityGoalPair(f"/forceset/{a}"))
     problem.addGoal(periodic)
+    if case == "emg":   # K8: the muscles follow the participant's EMG, already scaled (assist.emg_case)
+        assert emg, "`emg` needs the EMG reference"
+        ref = osim.TimeSeriesTable([float(x) for x in P * T])
+        goal = osim.MocoControlTrackingGoal("emg_tracking", EMG_W)
+        for c, v in emg.items():
+            ref.appendColumn(c.strip("/"), osim.Vector.createFromMat(np.asarray(v, float)))
+            goal.setReferenceLabel(c, c.strip("/"))
+        goal.setReference(osim.TableProcessor(ref))
+        problem.addGoal(goal)
 
     lo, hi = mean["pelvis_tilt"].min() - 10, mean["pelvis_tilt"].max() + 10
     problem.setStateInfo(f"{VALUE['pelvis_tilt']}/value", [lo * DEG, hi * DEG])
