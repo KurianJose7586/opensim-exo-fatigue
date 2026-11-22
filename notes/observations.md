@@ -961,6 +961,43 @@ exo-off TR solves on the scaled bodies yet.
   The same conclusion. HL03 fails the replay check again ("exo torque is not the prescribed
   torque"), as on the generic body, so it is something in HL03's predicted torque, not the body.
 
+### J6: the authors' EMG, and the twin's muscles against it (2026-11-22)
+
+The authors (Lhoste, Vianello) sent the EMG of HL01–HL05 on 2026-11-19: 189 files, 164 matched to
+exo runs, an index that places each file on the exo file's clock, a README, QC figures. Not public;
+`data/raw/exogait_emg/HL01-HL05_EMG/`, gitignored, never edited. Cite the article and Dryad.
+
+- **What it is:** five muscles per leg (RF, VL, BF, TA, MG; BF is missing from the article's Table 3
+  but was recorded). Raw volts, about 1008.5 Hz (1006.7–1011.9 by file, fitted per file), clipped at
+  about ±5.5 mV. Alignment to the exo clock about ±0.1 s (no sync pulse): fine for envelopes on our
+  ~3 s strides (3%), not for latencies. The first walking run of each participant has no EMG.
+- **`emg.py`:** 20–450 Hz band-pass, rectify, 6 Hz low-pass (the authors' recipe), sampled at each
+  kept stride's 101 instants, normalised per channel by the peak of the mean walking stride. 1,433 of
+  1,605 HL strides have EMG (HL01 273/315, HL02 301/349, HL03 313/339, HL04 281/320, HL05 265/282);
+  the rest fall in the uncovered first run or the first seconds of a run.
+- **Self-check (the README's, on our strides):** VL is a stance muscle in every leg, MG peaks at 44–64%,
+  TA at heel strike (4–18%) or in swing (61–87%). I first required TA ≤ 15% or ≥ 55%; HL02's left TA
+  peaks at 18%, in the loading response, so the bound is 25%. Said here because the check was loosened
+  after seeing data.
+- **The twin's activations against the EMG** (`emg.py model`; right-leg activations of each
+  `measured` walking solve that passed K5's checks, against the EMG's mean walking stride of the same
+  controller; shapes only, each curve divided by its peak; `figures/exogait/emg_vs_model.png`):
+
+  | Muscle (model) | Scaled bodies, median r (8 solves) | Generic body, median r (7) | Peak, EMG / model (% stride) |
+  |---|---|---|---|
+  | rectus femoris (rect_fem) | 0.27 | 0.26 | 82 / 81 |
+  | vastus lateralis (vasti) | 0.60 | 0.63 | 8 / 14 |
+  | biceps femoris (hamstrings) | 0.50 | 0.58 | 47 / 53 |
+  | tibialis anterior (tib_ant) | 0.46 | 0.50 | 6 / 1 |
+  | medial gastrocnemius (gastroc) | 0.61 | 0.44 | 49 / 50 |
+
+  The timing of every muscle's main burst is right. The shapes differ mostly in the baseline: the
+  EMG never falls below 20–30% of its peak, the model's activations go to near zero between bursts
+  (a minimum-effort solution has no co-contraction). RF is the weakest: its stance activity in the
+  EMG has no counterpart in the model. HL05 is missing (its solves fail K5's checks).
+- This is the first check of the twin's muscles against measurement. It is what we proposed to do
+  with Camargo et al.'s EMG if the authors had said no; now it is on the same people.
+
 ## Open questions
 
 - [ ] Resolve the threshold disagreement: 0.05 in code versus 0.02% in the paper. Which did they use?

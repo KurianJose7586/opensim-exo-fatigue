@@ -567,3 +567,13 @@ clock restarts in five files.
   itself the finding (H4 is the same on both).
 - **Not done:** the exo-off transparent solves on scaled bodies; AB75's
   `optimised` solve on a wider stride-length bound.
+
+### 2026-11-22: EMG received; J6 built on the authors' recipe; H5 is tested on real EMG
+
+- **Decided:** use the authors' EMG (HL01–HL05) for RO5 and H5. The fallback (H5 on the model's own
+  activations) is dropped. Envelope as the authors made theirs (20–450 Hz, rectify, 6 Hz); normalised
+  per channel to the peak of the mean walking stride, since no MVC trials exist.
+- **Why:** it is the same participants and sessions as our torque data, on the exo's own clock, and
+  the authors have checked the alignment (±0.1 s) and the channel map.
+- **Constraint:** not public data. It stays out of git and out of anything shared; cite the article
+  and Dryad. Ask the authors before publishing derived EMG tables.

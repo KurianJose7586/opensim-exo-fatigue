@@ -25,7 +25,7 @@ are the exoskeleton's torque. Simulation.*
 | The twin | `x2model.py`, `track.py` | **Reproduces walking** for all 19 in both controller modes (hip 0.6°, knee 0.4° median error), on a generic body |
 | Assistance in simulation | `assist.py` | **First result:** an optimised torque with the measured torque's budget lowers simulated muscle effort by 34% (16 of 16 participants). The AI's torque, replayed, matches the measured torque's effort (−1.4%) |
 | Statistics | `stats.py` | **Done** for H1–H4: all four supported; H2 and H3 are small effects for the strong models |
-| EMG | — | **Blocked:** not in the public dataset |
+| EMG | `emg.py` | **Received from the authors** for HL01–HL05 (not public): envelopes on our strides; the twin's activations checked against them |
 
 Reports for the faculty are in [`docs/reports/`](docs/reports/). Every number and how it was
 obtained: [`notes/observations.md`](notes/observations.md).

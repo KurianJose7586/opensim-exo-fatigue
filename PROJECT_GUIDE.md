@@ -44,15 +44,15 @@ The dataset is the ExoGait Benchmark (Lhoste et al. 2026, J NeuroEng Rehabil 23:
 |---|---|---|---|
 | RO1 | Reproducible preprocessing | `preprocess.py`, `split.py` | **Done.** 5,964 strides from all 19, whole-block train/val/test splits, a leakage self-check |
 | RO2 | Participant-specific torque models | `evaluate.py`, `lstm.py` | **Done.** Phase mean, ridge, random forest, bagged trees, LSTM, scored once on held-out test blocks. The personalised LSTM predicts the torque at the joint to 2.4 Nm in walking (R² 0.97 hip, 0.94 knee) |
-| RO3 | Participant-informed simulation | `x2model.py`, `track.py` | **Done on mean walking strides,** on a generic body. Each participant's height and mass are published and not yet used |
+| RO3 | Participant-informed simulation | `x2model.py`, `track.py` | **Done on mean walking strides,** on a generic body and on one scaled to each participant's published height and mass |
 | RO4 | AI torque + Moco | `assist.py` | **Done on mean SM strides.** Exo off, measured, AI, optimised. The LSTM's torque, replayed, gives the measured torque's effort (−1.4%, 15 participants, p = 0.36) |
-| RO5 | EMG-informed assistance | — | **Blocked.** No EMG in the public release. It exists for five participants; the authors have to be asked |
+| RO5 | EMG-informed assistance | `emg.py` | **Unblocked 2026-11-19:** the authors sent the EMG of HL01–HL05. Muscle-activity envelopes on 1,433 strides are built (J6); the twin's activations follow the EMG's timing (median r 0.27–0.61 by muscle). The EMG-informed controller (K8) is next |
 | RO6 | Accuracy, tracking, cost, robustness | `stats.py` | Tests and tables done for prediction and for mean strides; the at-scale run (single strides, ramps) is not started |
 | H1 | Personalised beats population | `evaluate.py`, `stats.py` | **Supported.** LSTM, walking: 2.36 vs 3.80 Nm, 19 of 19 participants, p = 3.8e-6 |
 | H2 | Gait phase helps | | **Supported, small for a strong model.** Random forest: 3.68 vs 4.02 Nm, 19 of 19, p = 3.8e-6 |
 | H3 | Locomotion mode helps | | **Supported, very small.** LSTM, all modes: 2.81 vs 2.95 Nm, 18 of 19, p = 7.6e-6 |
 | H4 | Optimised assistance lowers simulated effort | `assist.py` | **First result, 16 participants:** −34% against the measured torque at the same torque budget (16 of 16, p = 3.1e-5) |
-| H5 | EMG changes the allocation | — | Blocked with RO5 |
+| H5 | EMG changes the allocation | `assist.py` (K8) | Data in hand; test not yet run |
 
 ## 3. How each title term is delivered
 
@@ -129,6 +129,5 @@ Numbers and how they were obtained are in `notes/observations.md` (sections "K2"
 
 ## 8. Next
 
-1. Scale the model to each participant (height and mass are published) and solve again.
+1. K8: the EMG-informed assistance case and H5, on HL01–HL05.
 2. Single strides and ramps; the at-scale evaluation (K9), on the DGX if it is granted.
-3. EMG, if the authors release it (asked 2026-11-11). Otherwise RO5 and H5 are reported as not testable.
