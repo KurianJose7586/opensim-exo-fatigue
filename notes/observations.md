@@ -981,7 +981,7 @@ exo runs, an index that places each file on the exo file's clock, a README, QC f
   after seeing data.
 - **The twin's activations against the EMG** (`emg.py model`; right-leg activations of each
   `measured` walking solve that passed K5's checks, against the EMG's mean walking stride of the same
-  controller; shapes only, each curve divided by its peak; `figures/exogait/emg_vs_model.png`):
+  controller; shapes only, each curve divided by its peak; `figures/exogait/emg_vs_model.png`, kept out of git because the EMG is not public):
 
   | Muscle (model) | Scaled bodies, median r (8 solves) | Generic body, median r (7) | Peak, EMG / model (% stride) |
   |---|---|---|---|
