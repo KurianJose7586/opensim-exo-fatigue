@@ -14,7 +14,10 @@ The same tracking problem (track.py) is solved with different exo torques:
     ideal      chosen by Moco at almost no price, within the X2 limits. The measured torque is one of its
                feasible choices, so it wins by construction: an upper bound, never the H4 test. Only
                solved when asked for (the 4th argument)
-    ai         K3's predicted torque, replayed: not here yet (needs K3's predictions)
+    ai         K3's predicted torque, replayed like `measured`:
+                   micromamba run -n opensim python -u src/exogait/assist.py ai [ID] [condition] [model]
+               It needs evaluate.py's test predictions (predict/<model>_<ID>_pred.csv) and the `measured` and
+               `none` solves. A row goes to results/exogait/moco/ai.csv
 
 Effort = the sum of squared muscle activations, integrated over the stride and recomputed from each
 solution the same way. Never the Moco objective, which includes the tracking terms.
@@ -34,6 +37,7 @@ import numpy as np
 import opensim as osim
 import pandas as pd
 
+import preprocess
 import track
 import x2model
 
@@ -43,16 +47,16 @@ PRICE = 0.6   # first price tried per actuator, in the effort goal's units: HL03
 NAN = float("nan")
 
 
-def budgeted(subj, cond, n_mesh):
+def budgeted(subj, cond, n_mesh, case="optimised", start="measured", **solve):
     """The `optimised` solve: price each actuator's squared torque until it spends 90-102% of the measured
     budget (2% is the mesh's quadrature against the 101-point budget), or less at the floor price. Starts at
     PRICE from the `measured` solution, then a secant step per actuator on log(spend) against log(price);
     each solve starts from the last. Returns the summary row and the prices."""
     w, spend, slope = {a: PRICE for a in track.EXO}, None, {a: 1.0 for a in track.EXO}
-    guess = track.MOCO / f"{subj}_{cond}_mean_measured_m{n_mesh}.sto"
+    guess = track.MOCO / f"{subj}_{cond}_mean_{start}_m{n_mesh}.sto"
     for i in range(12):
-        row = track.solve(subj, cond, n_mesh, guess, "optimised", w)
-        assert row["success"], f"optimised, price step {i}: {row['status']}"
+        row = track.solve(subj, cond, n_mesh, guess, case, w, **solve)
+        assert row["success"], f"{case}, price step {i}: {row['status']}"
         now = {a: row[f"exo_int2_{a}"] / row[f"exo_budget_{a}"] for a in track.EXO}
         print(f"price step {i}: spend/budget {({a: round(v, 2) for a, v in now.items()})}, "
               f"price {({a: round(v, 3) for a, v in w.items()})}", flush=True)
@@ -61,12 +65,99 @@ def budgeted(subj, cond, n_mesh):
         for a in track.EXO if spend else ():   # -d log(spend) / d log(price), from the last two solves
             if w[a] != old[a] and now[a] != spend[a]:
                 slope[a] = float(np.clip(-np.log(now[a] / spend[a]) / np.log(w[a] / old[a]), 0.3, 3))
-        old, spend, guess = w, now, track.MOCO / f"{subj}_{cond}_mean_optimised_m{n_mesh}.sto"
+        old, spend, guess = w, now, track.MOCO / f"{subj}_{cond}_mean_{case}_m{n_mesh}.sto"
         w = {a: max(track.EXO_WEIGHT, w[a] * float(np.clip((now[a] / 0.96) ** (1 / slope[a]), 0.2, 8))) for a in track.EXO}
-    raise AssertionError(f"optimised: prices did not settle on the budget in 12 steps: {now}")
+    raise AssertionError(f"{case}: prices did not settle on the budget in 12 steps: {now}")
 
 
-def second_start(subj, cond, case, start_case, n_mesh=50):
+MUSCLE = {"rf": "rect_fem", "vl": "vasti", "bf": "hamstrings", "ta": "tib_ant", "mg": "gastroc"}   # EMG -> model
+
+
+def emg_reference(subj, cond):
+    """K8: the participant's EMG as Moco's reference, on the solve's stride (from right heel strike): the mean of
+    their walking right strides of this controller (emg.py), right muscles from the stride's own channels, left
+    muscles from the other leg's. Each envelope is 1 at the peak of that muscle's mean walking stride (both
+    controllers), so this controller's curve need not reach 1. Returns {control: values on x2model.P}."""
+    mode, controller = preprocess.labels(cond)
+    e = pd.read_csv(x2model.OUT.parent.parent / "data" / "processed" / "exogait" / f"{subj}_emg.csv")
+    e = e[(e["mode"] == mode) & (e.controller == controller) & (e.leg == "R")]
+    assert e.stride.nunique() >= 10, f"{subj} {cond}: {e.stride.nunique()} right strides with EMG"
+    m = e.groupby("phase").mean(numeric_only=True)
+    return {**{f"/{name}_r": m[k].to_numpy() for k, name in MUSCLE.items()},
+            **{f"/{name}_l": m[f"{k}_other"].to_numpy() for k, name in MUSCLE.items()}}, e.stride.nunique()
+
+
+def emg_case(subj="HL03", cond="SM_WALKING", n_mesh=50):
+    """K8, H5: `optimised` again with the muscles made to follow the participant's EMG (track.solve, case `emg`),
+    under the same per-actuator budget, from the `optimised` solution. H5 asks whether that changes the allocation:
+    the budget per actuator is fixed by construction, so the change is in when each actuator spends it. Compared per
+    actuator: the correlation and the RMS difference of the two torques, and the share given in the first 60% of the
+    stride. Appends a row to moco/emg.csv and draws plots/k8_<id>_<cond>_emg.png."""
+    rows = cases(subj, cond, n_mesh)
+    ref, n = emg_reference(subj, cond)
+    # The EMG has no absolute scale. Each muscle's envelope is scaled to the mean excitation that muscle has in
+    # `optimised`: the EMG may move when a muscle works, not how much on average. ponytail: one choice of anchor;
+    # Moco's own scale factors crash the solver here (track.solve).
+    opt = osim.MocoTrajectory(str(track.MOCO / f"{subj}_{cond}_mean_optimised_m{n_mesh}.sto"))
+    t_opt = np.array(opt.getTimeMat())
+    ref = {c: v * np.trapezoid(np.array(opt.getControlMat(c)), t_opt) / t_opt[-1] / v.mean() for c, v in ref.items()}
+    emg, price = budgeted(subj, cond, n_mesh, "emg", "optimised", emg=ref)
+    assert emg["check"] == "ok", f"emg: {emg['check']}"
+    torque = lambda case: (lambda s: (np.array(s.getTimeMat()) / s.getTimeMat()[-1],
+                                      {a: np.array(s.getControlMat(f"/forceset/{a}")) * x2model.EXO_F for a in track.EXO}))(
+        osim.MocoTrajectory(str(track.MOCO / f"{subj}_{cond}_mean_{case}_m{n_mesh}.sto")))
+    tau = {c: torque(c) for c in ("measured", "optimised", "emg")}
+    on = lambda c, a: np.interp(x2model.P, tau[c][0], tau[c][1][a])
+    early = lambda c, a: float(np.trapezoid(on(c, a)[:61] ** 2) / np.trapezoid(on(c, a) ** 2))   # share of the budget by 60%
+    e = {c: float(r["effort"]) for c, r in (("measured", rows["measured"]), ("optimised", rows["optimised"]), ("emg", emg))}
+
+    def match(case):   # how closely each muscle's excitation follows its EMG (shape: Pearson r over the stride)
+        s = osim.MocoTrajectory(str(track.MOCO / f"{subj}_{cond}_mean_{case}_m{n_mesh}.sto"))
+        ts = np.array(s.getTimeMat()) / s.getTimeMat()[-1]
+        return {m: round(float(np.corrcoef(np.interp(x2model.P, ts, np.array(s.getControlMat(m))), v)[0, 1]), 3) for m, v in ref.items()}
+    out = dict(participant=subj, condition=cond, n_mesh=n_mesh, emg_strides=n, emg_w=track.EMG_W,
+               **{f"effort_{c}": v for c, v in e.items()}, emg_vs_optimised_pct=round(100 * (e["emg"] / e["optimised"] - 1), 1),
+               emg_vs_measured_pct=round(100 * (e["emg"] / e["measured"] - 1), 1),
+               rmse_max_emg=max(float(emg[f"rmse_{j}"]) for j in JOINTS),
+               **{f"r_{a}": round(float(np.corrcoef(on("emg", a), on("optimised", a))[0, 1]), 3) for a in track.EXO},
+               **{f"diff_pct_{a}": round(100 * float(np.sqrt(np.mean((on("emg", a) - on("optimised", a)) ** 2)) /
+                                                    np.sqrt(np.mean(on("optimised", a) ** 2))), 1) for a in track.EXO},
+               **{f"early_{a}_{c}": round(early(c, a), 3) for a in track.EXO for c in ("measured", "optimised", "emg")},
+               **{f"emg_match_{c}": round(float(np.median(list(match(c).values()))), 3) for c in ("optimised", "emg")},
+               **{f"emg_r_{m.strip('/')}": v for m, v in match("emg").items()},
+               **{f"budget_used_{a}": round(emg[f"exo_int2_{a}"] / emg[f"exo_budget_{a}"], 3) for a in track.EXO})
+
+    import matplotlib.pyplot as plt
+    fig, axs = plt.subplots(1, 2, figsize=(12, 4.2))
+    style = {"measured": ("#9b9a94", "--", 1.4), "optimised": ("#1f9d6b", "-", 2.0), "emg": ("#2a78d6", "-", 2.2)}
+    for ax, j in zip(axs, ("hip", "knee")):
+        for c, (col, ls, lw) in style.items():
+            for s, alpha in (("r", 1.0), ("l", 0.45)):
+                ax.plot(100 * x2model.P, on(c, f"exo_{j}_{s}"), color=col, ls=ls, lw=lw, alpha=alpha,
+                        label=f"{c if c != 'emg' else 'optimised, muscles follow EMG'}" if s == "r" else None)
+        ax.axhline(0, color="#c3c2b7", lw=0.8)
+        ax.set_title(f"X2 {j} torque (dark: right, light: left)", fontsize=10, loc="left")
+        ax.set_xlabel("% stride from right heel strike")
+        ax.set_ylabel("Nm")
+        ax.grid(alpha=0.25)
+    axs[0].legend(fontsize=8, frameon=False)
+    fig.suptitle(f"{subj} {cond}: assistance chosen with and without the participant's EMG, same torque budget. Effort "
+                 f"{e['optimised']:.3f} -> {e['emg']:.3f}", x=0.01, ha="left", fontsize=10.5)
+    fig.tight_layout()
+    png = x2model.OUT / "plots" / f"k8_{subj}_{cond}_emg.png".lower()
+    fig.savefig(png, dpi=130)
+    plt.close(fig)
+    path = track.MOCO / "emg.csv"
+    new = not path.exists()
+    with open(path, "a", newline="") as f:
+        wr = csv.DictWriter(f, fieldnames=list(out))
+        if new:
+            wr.writeheader()
+        wr.writerow(out)
+    return out, png
+
+
+def second_start(subj, cond, case, start_case, n_mesh=50, **solve):
     """Re-solve `case` from the solution of `start_case`, and keep whichever of the two has the lower
     objective. IPOPT lands in different local solutions from different starts (notes "K7": one repeat
     doubled the effort), so one solve per case is not enough. The second solve runs in moco/second/; if it
@@ -81,7 +172,7 @@ def second_start(subj, cond, case, start_case, n_mesh=50):
     name = f"{subj}_{cond}_mean_{case}_m{n_mesh}"
     track.MOCO = main / "second"
     try:
-        row = track.solve(subj, cond, n_mesh, main / f"{subj}_{cond}_mean_{start_case}_m{n_mesh}.sto", case)
+        row = track.solve(subj, cond, n_mesh, main / f"{subj}_{cond}_mean_{start_case}_m{n_mesh}.sto", case, **solve)
     finally:
         track.MOCO = main
     kept = row["check"] == "ok" and row["objective"] < 0.999 * first
@@ -90,6 +181,68 @@ def second_start(subj, cond, case, start_case, n_mesh=50):
         with open(main / "summary.csv", "a", newline="") as f:
             csv.DictWriter(f, fieldnames=list(row)).writerow(row)
     return first, row["objective"], kept
+
+
+def ai_torque(subj, cond, model="lstm"):
+    """K3's predicted joint-output torque in the form K5 replays: the four actuators on the right-heel-strike stride,
+    averaged over the participant's test strides of this condition (personalised model, full inputs). A right test
+    stride gives the right hip and knee. The left ones are the predictions for the left test strides, read at the
+    same instants (np.interp on the clock, inside a block); a right stride the left predictions do not cover without
+    a break is left out. Returns {actuator: Nm on x2model.P} for the prediction and for the measured torque of the
+    same strides, and the number of strides."""
+    mode, controller = preprocess.labels(cond)
+    p = pd.read_csv(x2model.OUT / "predict" / f"{model}_{subj}_pred.csv").drop(columns="t")
+    p = p[(p.scheme == "personalised") & (p["mode"] == mode) & (p.controller == controller)]
+    cols = ["stride", "block", "phase", "t", "hip_tau_gauge", "knee_tau_gauge", "hip_tau_gauge_other", "knee_tau_gauge_other"]
+    p = p.merge(preprocess.read_strides([subj], usecols=cols), on=["stride", "phase"], validate="1:1")
+    ai, measured = ({a: [] for a in track.EXO} for _ in range(2))
+    for _, block in p.groupby("block"):
+        left = block[block.leg == "L"].sort_values("t").drop_duplicates("t")
+        for _, r in block[block.leg == "R"].groupby("stride"):
+            cover = left.t[(left.t >= r.t.iloc[0] - 0.15) & (left.t <= r.t.iloc[-1] + 0.15)]
+            if len(cover) < 2 or cover.iloc[0] > r.t.iloc[0] or cover.iloc[-1] < r.t.iloc[-1] or np.diff(cover).max() > 0.15:
+                continue
+            for j in ("hip", "knee"):
+                ai[f"exo_{j}_r"].append(r[f"{j}_tau_gauge_pred"].to_numpy())
+                ai[f"exo_{j}_l"].append(np.interp(r.t, left.t, left[f"{j}_tau_gauge_pred"]))
+                measured[f"exo_{j}_r"].append(r[f"{j}_tau_gauge"].to_numpy())
+                measured[f"exo_{j}_l"].append(r[f"{j}_tau_gauge_other"].to_numpy())
+    n = len(ai["exo_hip_r"])
+    assert n >= 3, f"{subj} {cond}: {n} right test strides with predictions for both legs"
+    mean = lambda v: (lambda m: m - (x2model.P - 0.5) * (m[-1] - m[0]))(np.mean(v, axis=0))   # periodic, as x2model makes its means
+    return {a: mean(v) for a, v in ai.items()}, {a: mean(v) for a, v in measured.items()}, n
+
+
+def replay_ai(subj="HL03", cond="SM_WALKING", model="lstm", n_mesh=50):
+    """K7's `ai` case: K3's predicted torque replayed on the mean stride, from the two starts `measured` gets, and
+    set against `measured` and `none`. Appends a row to moco/ai.csv and returns it."""
+    tau, same, n = ai_torque(subj, cond, model)
+    k5 = x2model.map_x2(subj, cond)["tau"]   # the measured torque that `measured` replays: the clean strides of every block
+    rms = lambda x: float(np.sqrt(np.mean(np.square(x))))
+    row = track.solve(subj, cond, n_mesh, track.MOCO / f"{subj}_{cond}_mean_measured_m{n_mesh}.sto", "ai", prescribed=tau)
+    assert row["check"] == "ok", f"ai: {row['check']}"
+    first, second, kept = second_start(subj, cond, "ai", "none", n_mesh, prescribed=tau)
+    done = pd.read_csv(track.MOCO / "summary.csv")
+    done = done[(done.participant == subj) & (done.condition == cond) & (done.n_mesh == n_mesh) & (done["check"] == "ok")]
+    last = {c: done[done.case == c].iloc[-1] for c in ("none", "measured", "ai")}
+    e = {c: float(v.effort) for c, v in last.items()}
+    out = dict(participant=subj, condition=cond, model=model, n_mesh=n_mesh, test_strides=n,
+               torque_rmse=round(float(np.mean([rms(tau[a] - same[a]) for a in track.EXO])), 2),          # the model's error on the mean torque
+               torque_rmse_vs_k5=round(float(np.mean([rms(tau[a] - k5[f"gauge_{c}"]) for a, c in track.EXO.items()])), 2),
+               selection_rmse=round(float(np.mean([rms(same[a] - k5[f"gauge_{c}"]) for a, c in track.EXO.items()])), 2),   # test strides vs all clean strides
+               **{f"effort_{c}": e[c] for c in e}, ai_vs_measured_pct=round(100 * (e["ai"] / e["measured"] - 1), 1),
+               ai_vs_none_pct=round(100 * (e["ai"] / e["none"] - 1), 1),
+               rmse_max_ai=max(float(last["ai"][f"rmse_{j}"]) for j in JOINTS), objective_ai=float(last["ai"].objective),
+               second_start_kept=kept,
+               **{f"budget_used_{a}": round(float(last["ai"][f"exo_int2_{a}"]) / float(last["ai"][f"exo_budget_{a}"]), 3) for a in track.EXO})
+    path = track.MOCO / "ai.csv"
+    new = not path.exists()
+    with open(path, "a", newline="") as f:
+        wr = csv.DictWriter(f, fieldnames=list(out))
+        if new:
+            wr.writeheader()
+        wr.writerow(out)
+    return out
 
 
 def cases(subj, cond, n_mesh=50, ideal=False):
@@ -173,6 +326,27 @@ def compare(subj="HL03", cond="SM_WALKING", n_mesh=50, ideal=False):
 
 
 if __name__ == "__main__":
+    import os
+    if os.environ.get("EXOGAIT_SCALED"):   # the twin scaled to this participant, into moco_scaled/ (track.scaled)
+        who = [a for a in sys.argv[1:] if len(a) == 4 and a[:2] in ("AB", "HL")]
+        print("scaled twin: length factor %.3f, body mass %.0f kg" % track.scaled(who[0] if who else "HL03"), flush=True)
+    if sys.argv[1:2] == ["ai"]:   # assist.py ai [ID] [condition] [model]
+        out = replay_ai(*sys.argv[2:5])
+        print("\n".join(f"  {k:<28} {v}" for k, v in out.items()))
+        assert out["rmse_max_ai"] < 3, "ai: hip or knee tracked worse than 3 deg"
+        print(f"OK: {out['participant']} {out['condition']}: the {out['model']}'s torque is {out['torque_rmse']} Nm RMS off the measured "
+              f"torque on the same {out['test_strides']} test strides; replayed, effort {out['effort_ai']} against {out['effort_measured']} "
+              f"measured ({out['ai_vs_measured_pct']:+.1f}%) and {out['effort_none']} with the exo off")
+        sys.exit()
+    if sys.argv[1:2] == ["emg"]:   # assist.py emg [ID] [condition]: K8, H5
+        out, png = emg_case(*sys.argv[2:4])
+        print("\n".join(f"  {k:<34} {v}" for k, v in out.items()))
+        assert all(out[f"budget_used_{a}"] <= 1.02 for a in track.EXO), "emg went over the measured torque budget"
+        print(f"OK: {out['participant']} {out['condition']}: with the muscles following the EMG, effort {out['effort_emg']} "
+              f"({out['emg_vs_optimised_pct']:+.1f}% vs optimised); torque vs optimised: r "
+              f"{min(out[f'r_{a}'] for a in track.EXO):.2f}..{max(out[f'r_{a}'] for a in track.EXO):.2f}, RMS difference "
+              f"{min(out[f'diff_pct_{a}'] for a in track.EXO):.0f}..{max(out[f'diff_pct_{a}'] for a in track.EXO):.0f}% of its size. Figure: {png}")
+        sys.exit()
     if sys.argv[1:2] == ["second"]:   # assist.py second ID condition: second starts for `measured` and `none`
         subj, cond = sys.argv[2], sys.argv[3]
         have = lambda c: (track.MOCO / f"{subj}_{cond}_mean_{c}_m50.sto").exists()

@@ -41,3 +41,6 @@ desktop.ini
 
 # Moco writes these while a solve runs; delete one to stop that solve
 delete_this_to_stop_optimization*
+
+# derived from the authors' EMG (not public): kept local
+figures/exogait/emg_*
